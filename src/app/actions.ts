@@ -98,3 +98,20 @@ export async function unplanSession(form: FormData) {
   await writePlan(plan.filter((p) => !(p.taskId === taskId && p.start.getTime() === start)));
   revalidatePath("/week");
 }
+
+/** Saves a suggested plan the athlete accepted, then returns to their week. */
+export async function acceptSuggestions(form: FormData) {
+  let rows: unknown = [];
+  try {
+    rows = JSON.parse(String(form.get("sessions") ?? "[]"));
+  } catch {}
+  const add = (Array.isArray(rows) ? rows : [])
+    .filter((r) => Array.isArray(r) && typeof r[0] === "string" && typeof r[1] === "string" && typeof r[2] === "number")
+    .map((r) => ({ taskId: r[0] as string, start: new Date(r[1] as string), mins: Math.round(r[2] as number) }))
+    .filter((r) => !Number.isNaN(r.start.getTime()) && r.mins > 0 && r.mins <= 12 * 60)
+    .slice(0, 40);
+  const { plan } = await readPrefs();
+  await writePlan([...plan, ...add]);
+  const back = String(form.get("back") ?? "/week");
+  redirect(back.startsWith("/week") ? back : "/week");
+}

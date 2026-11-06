@@ -2,13 +2,14 @@ import { connection } from "next/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { addTask, forgetMe, removeTask, saveSettings, saveWork, signOutAction } from "@/app/actions";
+import { acceptSuggestions, addTask, forgetMe, removeTask, saveSettings, saveWork, signOutAction } from "@/app/actions";
 import { canvasFeed, feedEvents } from "@/lib/canvas";
 import { findConflicts, tripName } from "@/lib/conflicts";
 import { demoEvents, demoTasks } from "@/lib/demo";
 import { listCalendar } from "@/lib/google";
 import { freeTime, hoursIn } from "@/lib/freetime";
 import { readPrefs } from "@/lib/prefs";
+import { suggestPlan } from "@/lib/suggest";
 import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/lib/time";
 import type { CalEvent, Task } from "@/lib/types";
 import { Alerts, type ConflictView, type Note } from "./Alerts";
@@ -23,11 +24,22 @@ export const instant = false;
 
 type View = "day" | "week" | "month";
 
-export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; d?: string; view?: string; demo?: string; free?: string; plan?: string; len?: string }> }) {
+export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; d?: string; view?: string; demo?: string; free?: string; plan?: string; len?: string; suggest?: string; skip?: string }> }) {
   await connection();
-  const { w, d: dParam, view: viewParam, demo: demoParam, free: freeParam, plan: planParam, len: lenParam } = await searchParams;
-  // Planning a task happens on the day or week grid, with free time showing.
-  const view: View = viewParam === "day" ? "day" : viewParam === "month" && !planParam ? "month" : "week";
+  const sp = await searchParams;
+  const { w, d: dParam, view: viewParam, demo: demoParam, free: freeParam, len: lenParam } = sp;
+  // "Suggest a plan" shows a proposal on the grid; "not here" skips are start-end minute pairs.
+  const suggesting = sp.suggest === "1";
+  const planParam = suggesting ? undefined : sp.plan;
+  const skips = suggesting
+    ? (sp.skip ?? "")
+        .split(",")
+        .map((x) => x.split("-").map(Number))
+        .filter((x) => x.length === 2 && x.every(Number.isFinite) && x[1] > x[0])
+        .slice(0, 40)
+    : [];
+  // Planning happens on the day or week grid.
+  const view: View = viewParam === "day" ? "day" : viewParam === "month" && !planParam && !suggesting ? "month" : "week";
   const showFree = freeParam === "1" || !!planParam;
   const demo = demoParam === "1";
   const session = demo ? null : await auth().catch(() => null);
@@ -51,7 +63,9 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
   const viewTo = atLocal(addDays(viewStart, viewDays), 0, tz);
   // Load enough for both the view and this week's work list.
   const loadFrom = viewFrom < from ? viewFrom : from;
-  const loadTo = viewTo > to ? viewTo : to;
+  // Suggestions look two weeks ahead, so next week's deadlines can start this week.
+  const horizonTo = new Date(to.getTime() + 7 * 86400000);
+  const loadTo = suggesting && horizonTo > viewTo ? horizonTo : viewTo > to ? viewTo : to;
   const loadDeadlinesTo = new Date(loadTo.getTime() + 21 * 86400000);
 
   let events: CalEvent[] = [];
@@ -142,10 +156,48 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
   const fixedHours = hoursIn(weekEvents.filter((e) => !e.allDay));
   const viewEvents = events.filter((e) => e.end > viewFrom && e.start < viewTo);
   const viewPlanned = planned.filter((p) => p.end > viewFrom && p.start < viewTo);
+  // Suggest a plan: spread what's left of each assignment over free time before it's due.
+  let suggestions: PlannedBlock[] = [];
+  const unfit: { title: string; mins: number }[] = [];
+  if (suggesting) {
+    const start = now > from ? now : from;
+    const skipEvents: CalEvent[] = skips.map(([a, b], i) => ({ id: `skip-${i}`, title: "skip", start: new Date(a * 60000), end: new Date(b * 60000), kind: "other" }));
+    const horizonFree = freeTime({
+      start: monday,
+      days: 14,
+      events: busy([...events.filter((e) => e.start < horizonTo), ...skipEvents]),
+      tz,
+      dayStart: settings.wake,
+      dayEnd: settings.bedtime,
+    });
+    const plannedByDay = new Map<string, number>();
+    for (const p of planned) {
+      const k = dayKey(localDay(p.start, tz));
+      plannedByDay.set(k, (plannedByDay.get(k) ?? 0) + (p.end.getTime() - p.start.getTime()) / 60000);
+    }
+    const want = open
+      .filter((t) => t.due < horizonTo)
+      .map((t) => ({ id: t.id, due: t.due, minsLeft: Math.round(t.hours * 60 - (plannedMins.get(t.id) ?? 0)) }))
+      .filter((t) => t.minsLeft > 0);
+    const proposal = suggestPlan({ tasks: want, free: horizonFree, events: events.filter((e) => e.start < horizonTo), tz, now: start, plannedByDay });
+    suggestions = proposal.map((p) => ({ taskId: p.taskId, title: byId.get(p.taskId)?.title ?? "Work", start: p.start, end: new Date(p.start.getTime() + p.mins * 60000) }));
+    for (const t of want) {
+      const got = proposal.filter((p) => p.taskId === t.id).reduce((n, p) => n + p.mins, 0);
+      if (t.minsLeft - got >= 15) unfit.push({ title: byId.get(t.id)!.title, mins: t.minsLeft - got });
+    }
+  }
+  const suggestedHours = suggestions.reduce((n, p) => n + (p.end.getTime() - p.start.getTime()) / 3600000, 0);
+  const suggestedTasks = new Set(suggestions.map((p) => p.taskId)).size;
+  const viewSuggested = suggestions.filter((p) => p.end > viewFrom && p.start < viewTo);
   const viewFree = showFree
-    ? freeTime({ start: viewStart, days: viewDays, events: busy(viewEvents), tz, dayStart: settings.wake, dayEnd: settings.bedtime }).filter(
-        (f) => demo || f.end > now,
-      )
+    ? freeTime({
+        start: viewStart,
+        days: viewDays,
+        events: busy([...viewEvents, ...suggestions.map((p, i) => ({ id: `sg-${i}`, title: p.title, start: p.start, end: p.end, kind: "other" as const }))]),
+        tz,
+        dayStart: settings.wake,
+        dayEnd: settings.bedtime,
+      }).filter((f) => demo || f.end > now)
     : [];
 
   // Planning mode: the task being placed and how long each session is.
@@ -200,12 +252,20 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
         ? utc(anchor).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
         : `${fmtRange(monday)} – ${sunday.m === monday.m ? sunday.d : fmtRange(sunday)}`;
   const today = dayKey(localDay(new Date(), tz));
-  const link = (opts: { d?: string; view?: View; free?: boolean; plan?: string | null; len?: number }) => {
+  const link = (opts: { d?: string; view?: View; free?: boolean; plan?: string | null; len?: number; suggest?: boolean; skip?: string }) => {
     const p = new URLSearchParams();
     const v = opts.view ?? view;
     if (v !== "week") p.set("view", v);
     if (opts.d) p.set("d", opts.d);
     if (demo) p.set("demo", "1");
+    const suggest = opts.suggest ?? (suggesting && opts.plan === undefined);
+    if (suggest) {
+      p.set("suggest", "1");
+      const sk = opts.skip ?? (opts.suggest === undefined ? (sp.skip ?? "") : "");
+      if (sk) p.set("skip", sk);
+      if (freeParam === "1") p.set("free", "1");
+      return `/week?${p.toString()}`;
+    }
     const planning = opts.plan === undefined ? planParam : opts.plan;
     if (planning) {
       p.set("plan", planning);
@@ -296,6 +356,31 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
 
       <div className={styles.layout}>
         <section className={styles.main}>
+          {suggesting && (
+            <div className={styles.planBar}>
+              <div>
+                <b>
+                  {suggestions.length
+                    ? `Suggested: ${suggestions.length} session${suggestions.length === 1 ? "" : "s"}, ${round(suggestedHours)}h for ${suggestedTasks} assignment${suggestedTasks === 1 ? "" : "s"}`
+                    : "Nothing to suggest: your work is planned or there's no free time before it's due"}
+                </b>
+                <span>
+                  The faded blocks are a suggestion. Tap × on any you don&apos;t want there and it finds another time. Game and travel days stay clear.
+                  {unfit.length > 0 && ` Didn't fit before the deadline: ${unfit.map((u) => `${round(u.mins / 60)}h of ${u.title}`).join(", ")}.`}
+                </span>
+              </div>
+              {suggestions.length > 0 && (
+                <form action={acceptSuggestions}>
+                  <input type="hidden" name="sessions" value={JSON.stringify(suggestions.map((p) => [p.taskId, p.start.toISOString(), (p.end.getTime() - p.start.getTime()) / 60000]))} />
+                  <input type="hidden" name="back" value={link({ d: here, suggest: false })} />
+                  <button className={styles.btnPrimary}>Accept plan</button>
+                </form>
+              )}
+              <Link className={styles.btn} href={link({ d: here, suggest: false })}>
+                Cancel
+              </Link>
+            </div>
+          )}
           {planTask && (
             <div className={styles.planBar}>
               <div>
@@ -352,10 +437,17 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 </span>
               )}
             </div>
-            <Link className={`${styles.toggle} ${showFree ? styles.toggleOn : ""}`} href={link({ d: here, free: !showFree, plan: null })} aria-pressed={showFree}>
-              <span className={styles.knob} />
-              Show free time
-            </Link>
+            <div className={styles.barRight}>
+              {view !== "month" && !suggesting && !planTask && (
+                <Link className={styles.suggestBtn} href={link({ d: here, suggest: true })}>
+                  ✨ Suggest a plan
+                </Link>
+              )}
+              <Link className={`${styles.toggle} ${showFree ? styles.toggleOn : ""}`} href={link({ d: here, free: !showFree, plan: null, suggest: false })} aria-pressed={showFree}>
+                <span className={styles.knob} />
+                Show free time
+              </Link>
+            </div>
           </div>
           {view === "month" ? (
             <MonthGrid
@@ -379,6 +471,10 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 free={viewFree}
                 due={viewDue}
                 planned={viewPlanned}
+                suggested={viewSuggested.map((p) => {
+                  const k = `${Math.round(p.start.getTime() / 60000)}-${Math.round(p.end.getTime() / 60000)}`;
+                  return { ...p, skipHref: link({ d: here, skip: [sp.skip, k].filter(Boolean).join(",") }) };
+                })}
                 placing={planTask && planLeft > 0 ? { taskId: planTask.id, mins: planLen } : undefined}
                 today={today}
               />

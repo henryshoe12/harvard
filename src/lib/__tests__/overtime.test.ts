@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { classify } from "../classify";
 import { demoEvents } from "../demo";
 import { freeTime, hoursIn } from "../freetime";
-import { atLocal, localMinutes, parseClock } from "../time";
+import { atLocal, localDay, localMinutes, parseClock } from "../time";
 import { DEFAULT_SETTINGS } from "../types";
 
 const tz = DEFAULT_SETTINGS.tz;
@@ -167,5 +167,36 @@ describe("email drafts", () => {
     expect(greeting("Sam Ortiz")).toBe("Hi Sam,");
     expect(greeting("Dr. Priya Raman")).toBe("Hi Dr. Raman,");
     expect(composeLinks("a@b.edu", "Hi there", "Line 1\nLine 2").mail).toBe("mailto:a%40b.edu?subject=Hi%20there&body=Line%201%0ALine%202");
+  });
+});
+
+describe("suggest a plan", () => {
+  it("fits each task before it's due, spread out, and keeps game and travel days clear", async () => {
+    const { suggestPlan } = await import("../suggest");
+    const { demoTasks } = await import("../demo");
+    const events = demoEvents(monday, tz);
+    const free = freeTime({ start: monday, events, tz, dayStart: "07:00", dayEnd: "23:00" });
+    const tasks = demoTasks(monday, tz).map((t) => ({ id: t.id, due: t.due, minsLeft: t.hours * 60 }));
+    const now = atLocal(monday, parseClock("06:00"), tz);
+    const plan = suggestPlan({ tasks, free, events, tz, now });
+    const byTask = (id: string) => plan.filter((p) => p.taskId === id);
+    for (const t of tasks) {
+      const s = byTask(t.id);
+      for (const p of s) expect(p.start.getTime() + p.mins * 60000).toBeLessThanOrEqual(t.due.getTime() - 3600000);
+    }
+    // 4h problem set due Wednesday night: fully planned in sessions of at most 1.5h on different days.
+    const ps = byTask("t1");
+    expect(ps.reduce((n, p) => n + p.mins, 0)).toBe(240);
+    expect(Math.max(...ps.map((p) => p.mins))).toBeLessThanOrEqual(90);
+    // Nothing on Friday (travel) or Saturday (game), and nothing overlaps a fixed event.
+    for (const p of plan) {
+      const d = localDay(p.start, tz).d;
+      expect([13, 14]).not.toContain(d);
+      const end = new Date(p.start.getTime() + p.mins * 60000);
+      for (const e of events) expect(overlaps({ start: p.start, end }, e)).toBe(false);
+    }
+    // No two suggestions overlap.
+    const sorted = [...plan].sort((a, b) => a.start.getTime() - b.start.getTime());
+    for (let i = 1; i < sorted.length; i++) expect(sorted[i].start.getTime()).toBeGreaterThanOrEqual(sorted[i - 1].start.getTime() + sorted[i - 1].mins * 60000);
   });
 });

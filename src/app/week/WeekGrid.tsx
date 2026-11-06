@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { unplanSession } from "@/app/actions";
 import type { FreeBlock } from "@/lib/freetime";
 import { addDays, atLocal, dayKey, type LocalDay } from "@/lib/time";
@@ -13,7 +14,7 @@ const END_HOUR = 24;
 const PX_PER_HOUR = 46;
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-type Item = { key: string; title: string; start: Date; end: Date; cls: string; label?: string; minH?: number; kind?: "free" | "plan"; taskId?: string };
+type Item = { key: string; title: string; start: Date; end: Date; cls: string; label?: string; minH?: number; kind?: "free" | "plan" | "suggest"; taskId?: string; href?: string };
 
 /** A day or a week: fixed schedule, deadlines as small markers, and (optionally) free time. */
 export function WeekGrid({
@@ -24,6 +25,7 @@ export function WeekGrid({
   free,
   due,
   planned = [],
+  suggested = [],
   placing,
   today,
 }: {
@@ -34,6 +36,8 @@ export function WeekGrid({
   free: FreeBlock[];
   due: Task[];
   planned?: PlannedBlock[];
+  /** A proposed plan, with a link that drops each block ("not here"). */
+  suggested?: (PlannedBlock & { skipHref: string })[];
   /** While planning a task: free gaps become clickable and drop a session of `mins`. */
   placing?: { taskId: string; mins: number };
   today?: string;
@@ -62,6 +66,16 @@ export function WeekGrid({
       label: range(p.start, p.end),
       kind: "plan" as const,
       taskId: p.taskId,
+    })),
+    ...suggested.map((p) => ({
+      key: `s-${p.taskId}-${p.start.getTime()}`,
+      title: p.title,
+      start: p.start,
+      end: p.end,
+      cls: styles.suggested,
+      label: range(p.start, p.end),
+      kind: "suggest" as const,
+      href: p.skipHref,
     })),
     ...events
       .filter((e) => !e.allDay)
@@ -125,6 +139,17 @@ export function WeekGrid({
                         taskId={placing.taskId}
                         mins={placing.mins}
                       />
+                    );
+                  }
+                  if (it.kind === "suggest") {
+                    return (
+                      <div key={it.key} className={`${styles.block} ${it.cls}`} style={{ top: y, height: h }} title={`Suggested: ${it.title} · ${it.label}`}>
+                        <strong>{it.title}</strong>
+                        {h > 30 && <small>{it.label}</small>}
+                        <Link className={styles.unplanLink} href={it.href!} scroll={false} aria-label={`Not here: ${it.title}`}>
+                          ×
+                        </Link>
+                      </div>
                     );
                   }
                   if (it.kind === "plan") {
