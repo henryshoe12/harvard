@@ -6,20 +6,22 @@ import styles from "./week.module.css";
 const START_HOUR = 6;
 const END_HOUR = 24;
 const PX_PER_HOUR = 46;
-const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 type Item = { key: string; title: string; start: Date; end: Date; cls: string; label?: string; minH?: number };
 
-/** The week: fixed schedule, deadlines as small markers, and (optionally) free time. */
+/** A day or a week: fixed schedule, deadlines as small markers, and (optionally) free time. */
 export function WeekGrid({
-  monday,
+  start,
+  days = 7,
   tz,
   events,
   free,
   due,
   today,
 }: {
-  monday: LocalDay;
+  start: LocalDay;
+  days?: number;
   tz: string;
   events: CalEvent[];
   free: FreeBlock[];
@@ -56,7 +58,10 @@ export function WeekGrid({
   const height = (END_HOUR - START_HOUR) * PX_PER_HOUR;
 
   return (
-    <div className={styles.grid}>
+    <div
+      className={styles.grid}
+      style={days === 1 ? { gridTemplateColumns: "52px 1fr", minWidth: 0 } : undefined}
+    >
       <div className={styles.hours} style={{ height }}>
         {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => (
           <div key={i} className={styles.hourLabel} style={{ top: i * PX_PER_HOUR }}>
@@ -64,8 +69,9 @@ export function WeekGrid({
           </div>
         ))}
       </div>
-      {DOW.map((name, i) => {
-        const day = addDays(monday, i);
+      {Array.from({ length: days }, (_, i) => {
+        const day = addDays(start, i);
+        const name = DOW[new Date(Date.UTC(day.y, day.m - 1, day.d)).getUTCDay()];
         const top = atLocal(day, START_HOUR * 60, tz).getTime();
         const bottom = atLocal(day, END_HOUR * 60, tz).getTime();
         return (

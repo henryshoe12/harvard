@@ -11,7 +11,8 @@ import { freeTime, hoursIn } from "@/lib/freetime";
 import { readPrefs } from "@/lib/prefs";
 import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/lib/time";
 import type { CalEvent, Task } from "@/lib/types";
-import { TravelConflicts, type ConflictView } from "./TravelConflicts";
+import { Alerts, type ConflictView, type Note } from "./Alerts";
+import { MonthGrid } from "./MonthGrid";
 import { WeekGrid } from "./WeekGrid";
 import styles from "./week.module.css";
 
@@ -20,9 +21,12 @@ export const metadata = { title: "Your week · Overtime" };
 // Every view reads the session and the athlete's own calendar, so render on request.
 export const instant = false;
 
-export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; demo?: string; free?: string }> }) {
+type View = "day" | "week" | "month";
+
+export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; d?: string; view?: string; demo?: string; free?: string }> }) {
   await connection();
-  const { w, demo: demoParam, free: freeParam } = await searchParams;
+  const { w, d: dParam, view: viewParam, demo: demoParam, free: freeParam } = await searchParams;
+  const view: View = viewParam === "day" || viewParam === "month" ? viewParam : "week";
   const showFree = freeParam === "1";
   const demo = demoParam === "1";
   const session = demo ? null : await auth().catch(() => null);
@@ -30,16 +34,35 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
   // Signed in with Google, or set up with calendar links only (schools that block Google apps).
   if (!demo && !session && !teamUrl && !canvasUrl) redirect("/");
   const tz = settings.tz;
-  const monday = weekStart(w && /^\d{4}-\d{2}-\d{2}$/.test(w) ? parseDayKey(w) : localDay(new Date(), tz));
+  const isKey = (k?: string) => !!k && /^\d{4}-\d{2}-\d{2}$/.test(k);
+  // The day the athlete is looking at; day, week and month views are all built around it.
+  const anchor = isKey(dParam) ? parseDayKey(dParam!) : isKey(w) ? parseDayKey(w!) : localDay(new Date(), tz);
+  const monday = weekStart(anchor);
   const from = atLocal(monday, 0, tz);
   const to = atLocal(addDays(monday, 7), 0, tz);
+  // What the calendar shows: one day, the week, or the whole month (as full weeks).
+  const firstOfMonth = { y: anchor.y, m: anchor.m, d: 1 };
+  const lastOfMonth = addDays({ y: anchor.m === 12 ? anchor.y + 1 : anchor.y, m: (anchor.m % 12) + 1, d: 1 }, -1);
+  const viewStart = view === "day" ? anchor : view === "month" ? weekStart(firstOfMonth) : monday;
+  const daysBetween = (a: typeof anchor, b: typeof anchor) => Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 86400000);
+  const viewDays = view === "day" ? 1 : view === "month" ? daysBetween(viewStart, weekStart(lastOfMonth)) + 7 : 7;
+  const viewFrom = atLocal(viewStart, 0, tz);
+  const viewTo = atLocal(addDays(viewStart, viewDays), 0, tz);
+  // Load enough for both the view and this week's work list.
+  const loadFrom = viewFrom < from ? viewFrom : from;
+  const loadTo = viewTo > to ? viewTo : to;
+  const loadDeadlinesTo = new Date(loadTo.getTime() + 21 * 86400000);
 
   let events: CalEvent[] = [];
   let tasks: Task[] = [...manualTasks];
   const problems: string[] = [];
 
   if (demo) {
-    events = demoEvents(monday, tz);
+    // The sample week's schedule, repeated for every week on screen; its homework once.
+    for (let wk = weekStart(localDay(loadFrom, tz)); atLocal(wk, 0, tz) < loadTo; wk = addDays(wk, 7)) {
+      const tag = dayKey(wk);
+      events.push(...demoEvents(wk, tz).map((e) => ({ ...e, id: `${e.id}-${tag}` })));
+    }
     tasks.push(...demoTasks(monday, tz));
   } else {
     if (session && (!session.accessToken || session.error)) {
@@ -47,8 +70,8 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     } else if (session?.accessToken) {
       try {
         // Deadlines are looked up three weeks ahead so next week's midterm shows as coming up.
-        const cal = await listCalendar(session.accessToken, from, atLocal(addDays(monday, 21), 0, tz), tz);
-        events = cal.events.filter((e) => e.start < to);
+        const cal = await listCalendar(session.accessToken, loadFrom, loadDeadlinesTo, tz);
+        events = cal.events.filter((e) => e.start < loadTo);
         tasks.push(...cal.tasks);
       } catch (e) {
         problems.push(`Couldn't read Google Calendar (${(e as Error).message}).`);
@@ -56,9 +79,9 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     }
     if (canvasUrl) {
       try {
-        const canvas = await canvasFeed(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz), tz);
+        const canvas = await canvasFeed(canvasUrl, loadFrom, loadDeadlinesTo, tz);
         tasks.push(...canvas.tasks);
-        events.push(...canvas.events.filter((e) => e.start < to));
+        events.push(...canvas.events.filter((e) => e.start < loadTo));
       } catch (e) {
         problems.push(`Couldn't read your Canvas link: ${(e as Error).message}.`);
       }
@@ -66,7 +89,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     if (teamUrl) {
       try {
         const seen = new Set(events.map((e) => `${e.title}|${e.start.getTime()}`));
-        events.push(...(await feedEvents(teamUrl, from, to)).filter((e) => !seen.has(`${e.title}|${e.start.getTime()}`)));
+        events.push(...(await feedEvents(teamUrl, loadFrom, loadTo)).filter((e) => !seen.has(`${e.title}|${e.start.getTime()}`)));
       } catch (e) {
         problems.push(`Couldn't read your team schedule link: ${(e as Error).message}.`);
       }
@@ -92,42 +115,74 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
   const finished = tasks.filter((t) => done.has(t.id));
 
   // Free time between fixed commitments, inside the hours the athlete says their day runs.
-  const free = freeTime({ start: monday, events, tz, dayStart: settings.wake, dayEnd: settings.bedtime });
+  const weekEvents = events.filter((e) => e.end > from && e.start < to);
+  const free = freeTime({ start: monday, events: weekEvents, tz, dayStart: settings.wake, dayEnd: settings.bedtime });
   const freeLeft = hoursIn(free, now > from ? now : undefined);
   const workHours = thisWeek.reduce((n, t) => n + t.hours, 0);
-  const fixedHours = hoursIn(events.filter((e) => !e.allDay && e.end > from && e.start < to));
-  // Trips and games that land on class time or deadlines.
-  const conflicts: ConflictView[] = findConflicts(events, open).map((c) => ({
-    id: c.trip.id,
-    place: tripName(c.trip),
-    away: c.trip.away,
-    start: c.trip.start.toISOString(),
-    end: c.trip.end.toISOString(),
-    courses: c.courses.map((k) => ({
-      course: k.course,
-      missed: k.missed.map((m) => ({ title: m.title, start: m.start.toISOString() })),
-      due: k.due.map((t) => ({ title: t.title, due: t.due.toISOString() })),
-    })),
-  }));
+  const fixedHours = hoursIn(weekEvents.filter((e) => !e.allDay));
+  const viewEvents = events.filter((e) => e.end > viewFrom && e.start < viewTo);
+  const viewFree = showFree ? freeTime({ start: viewStart, days: viewDays, events: viewEvents, tz, dayStart: settings.wake, dayEnd: settings.bedtime }) : [];
+  const viewDue = open.filter((t) => t.due >= viewFrom && t.due < viewTo);
+
+  // Trips and games this week that land on class time or deadlines.
+  const conflicts: ConflictView[] = findConflicts(weekEvents, open)
+    .filter((c) => c.trip.end > now)
+    .map((c) => ({
+      id: c.trip.id,
+      place: tripName(c.trip),
+      away: c.trip.away,
+      start: c.trip.start.toISOString(),
+      end: c.trip.end.toISOString(),
+      courses: c.courses.map((k) => ({
+        course: k.course,
+        missed: k.missed.map((m) => ({ title: m.title, start: m.start.toISOString() })),
+        due: k.due.map((t) => ({ title: t.title, due: t.due.toISOString() })),
+      })),
+    }));
   const athleteName = settings.name || (demo ? "" : (session?.user?.name ?? ""));
   const sport = settings.sport || (demo ? "football" : "");
   const round = (h: number) => (Math.round(h * 2) / 2).toString();
   const tight = workHours > freeLeft;
+  const notes: Note[] = [
+    ...(tight
+      ? [
+          {
+            id: "tight",
+            tone: "warn" as const,
+            text: `${round(workHours)}h of work is due this week, and you have ${round(freeLeft)}h of free time left.`,
+            detail: "Free time counts the open gaps of 30 minutes or more between when your day starts and ends (Settings). Turn on Show free time to see them.",
+          },
+        ]
+      : []),
+    ...problems.map((p, i) => ({ id: `p${i}`, tone: "warn" as const, text: p.split(/[(:]/)[0].trim().replace(/\.$/, "") + ".", detail: p })),
+  ];
 
   const fmtDue = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "numeric", minute: "2-digit" });
   const fmtDate = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
-  const fmtRange = (d: typeof monday) => new Date(Date.UTC(d.y, d.m - 1, d.d)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const utc = (d: typeof monday) => new Date(Date.UTC(d.y, d.m - 1, d.d));
+  const fmtRange = (d: typeof monday) => utc(d).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   const sunday = addDays(monday, 6);
-  const rangeLabel = `${fmtRange(monday)} – ${sunday.m === monday.m ? sunday.d : fmtRange(sunday)}`;
+  const title =
+    view === "day"
+      ? utc(anchor).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })
+      : view === "month"
+        ? utc(anchor).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
+        : `${fmtRange(monday)} – ${sunday.m === monday.m ? sunday.d : fmtRange(sunday)}`;
   const today = dayKey(localDay(new Date(), tz));
-  const link = (opts: { week?: string; free?: boolean }) => {
+  const link = (opts: { d?: string; view?: View; free?: boolean }) => {
     const p = new URLSearchParams();
-    if (opts.week) p.set("w", opts.week);
+    const v = opts.view ?? view;
+    if (v !== "week") p.set("view", v);
+    if (opts.d) p.set("d", opts.d);
     if (demo) p.set("demo", "1");
     if (opts.free ?? showFree) p.set("free", "1");
     const qs = p.toString();
     return `/week${qs ? `?${qs}` : ""}`;
   };
+  const step = (n: number) =>
+    dayKey(view === "day" ? addDays(anchor, n) : view === "week" ? addDays(monday, 7 * n) : { y: anchor.m + n > 12 ? anchor.y + 1 : anchor.m + n < 1 ? anchor.y - 1 : anchor.y, m: ((anchor.m + n + 11) % 12) + 1, d: 1 });
+  const here = dayKey(anchor);
+  const unit = view === "day" ? "day" : view === "week" ? "week" : "month";
 
   const workRow = (t: Task, showDate: boolean) => (
     <li key={t.id} className={done.has(t.id) ? styles.isDone : ""}>
@@ -153,20 +208,33 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     <main className={styles.page}>
       <header className={styles.top}>
         <div>
-          <p className={styles.brand}>Overtime</p>
-          <h1>{rangeLabel}</h1>
+          <p className={styles.brand}>
+            Overtime{demo && <span className={styles.demoTag}>Demo</span>}
+          </p>
+          <h1>{title}</h1>
+          <p className={styles.summary}>
+            <b>{round(workHours)}h</b> of work due this week · <b className={tight ? styles.tightText : ""}>{round(freeLeft)}h</b> free
+            {now > from && now < to ? " left" : ""} · <b>{round(fixedHours)}h</b> on your schedule
+          </p>
         </div>
         <nav className={styles.nav}>
           <div className={styles.segment}>
-            <Link className={styles.segBtn} href={link({ week: dayKey(addDays(monday, -7)) })} aria-label="Previous week">
+            <Link className={styles.segBtn} href={link({ d: step(-1) })} aria-label={`Previous ${unit}`}>
               ‹
             </Link>
             <Link className={styles.segBtn} href={link({})}>
               Today
             </Link>
-            <Link className={styles.segBtn} href={link({ week: dayKey(addDays(monday, 7)) })} aria-label="Next week">
+            <Link className={styles.segBtn} href={link({ d: step(1) })} aria-label={`Next ${unit}`}>
               ›
             </Link>
+          </div>
+          <div className={styles.segment} role="group" aria-label="View">
+            {(["day", "week", "month"] as const).map((v) => (
+              <Link key={v} className={`${styles.segBtn} ${v === view ? styles.segOn : ""}`} href={link({ view: v, d: here })} aria-current={v === view}>
+                {v[0].toUpperCase() + v.slice(1)}
+              </Link>
+            ))}
           </div>
           <Link className={styles.btn} href={demo ? "/classes?demo=1" : "/classes"}>
             Classes
@@ -183,31 +251,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
         </nav>
       </header>
 
-      {demo && <div className={styles.banner}>Demo week: a sample in-season football schedule.</div>}
-      {problems.map((p) => (
-        <div key={p} className={styles.warn}>
-          {p}
-        </div>
-      ))}
-
-      {conflicts.length > 0 && <TravelConflicts conflicts={conflicts} tz={tz} athleteName={athleteName} sport={sport} demo={demo} />}
-
-      <div className={styles.stats}>
-        <div className={styles.stat}>
-          <b>{round(workHours)}h</b>
-          <span>
-            of work due this week · {thisWeek.length} item{thisWeek.length === 1 ? "" : "s"}
-          </span>
-        </div>
-        <div className={`${styles.stat} ${tight ? styles.statTight : ""}`}>
-          <b>{round(freeLeft)}h</b>
-          <span>{now > from && now < to ? "of free time left this week" : "of free time this week"}</span>
-        </div>
-        <div className={styles.stat}>
-          <b>{round(fixedHours)}h</b>
-          <span>on your fixed schedule</span>
-        </div>
-      </div>
+      <Alerts conflicts={conflicts} notes={notes} tz={tz} athleteName={athleteName} sport={sport} demo={demo} />
 
       <div className={styles.layout}>
         <section className={styles.main}>
@@ -236,14 +280,28 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 </span>
               )}
             </div>
-            <Link className={`${styles.toggle} ${showFree ? styles.toggleOn : ""}`} href={link({ week: dayKey(monday), free: !showFree })} aria-pressed={showFree}>
+            <Link className={`${styles.toggle} ${showFree ? styles.toggleOn : ""}`} href={link({ d: here, free: !showFree })} aria-pressed={showFree}>
               <span className={styles.knob} />
               Show free time
             </Link>
           </div>
-          <div className={styles.gridWrap}>
-            <WeekGrid monday={monday} tz={tz} events={events} free={showFree ? free : []} due={thisWeek} today={today} />
-          </div>
+          {view === "month" ? (
+            <MonthGrid
+              start={viewStart}
+              weeks={viewDays / 7}
+              month={anchor.m}
+              tz={tz}
+              events={viewEvents}
+              due={viewDue}
+              free={showFree ? viewFree : null}
+              today={today}
+              dayHref={(k) => link({ view: "day", d: k })}
+            />
+          ) : (
+            <div className={styles.gridWrap}>
+              <WeekGrid start={viewStart} days={viewDays} tz={tz} events={viewEvents} free={viewFree} due={viewDue} today={today} />
+            </div>
+          )}
         </section>
 
         <aside className={styles.side}>

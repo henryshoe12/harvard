@@ -17,41 +17,74 @@ export type ConflictView = {
   courses: { course: string; missed: { title: string; start: string }[]; due: { title: string; due: string }[] }[];
 };
 
-type Props = { conflicts: ConflictView[]; tz: string; athleteName: string; sport: string; demo: boolean };
+/** A short note shown at the top: a heads-up line that opens into details. */
+export type Note = { id: string; tone: "warn" | "info"; text: string; detail?: string };
 
-/** Classes and deadlines that land on a trip, with a ready-to-edit email for each course. */
-export function TravelConflicts({ conflicts, tz, athleteName, sport, demo }: Props) {
+type Props = { conflicts: ConflictView[]; notes: Note[]; tz: string; athleteName: string; sport: string; demo: boolean };
+
+/**
+ * The top of the page: one line per thing worth knowing (a trip that runs into
+ * class, more work than free time, a calendar link that failed). Each opens for
+ * details; travel conflicts open into a ready-to-edit email per class.
+ */
+export function Alerts({ conflicts, notes, tz, athleteName, sport, demo }: Props) {
   const { list: syllabi } = useSyllabi(demo);
+  const [open, setOpen] = useState<string | null>(null);
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "numeric", minute: "2-digit" });
+  const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" });
   const classesHref = demo ? "/classes?demo=1" : "/classes";
+  if (!conflicts.length && !notes.length) return null;
+
+  const toggle = (id: string) => setOpen(open === id ? null : id);
+  const days = (c: ConflictView) => {
+    const a = dayFmt.format(new Date(c.start)),
+      b = dayFmt.format(new Date(c.end));
+    return a === b ? a : `${a}–${b}`;
+  };
 
   return (
-    <section className={styles.conflicts} aria-label="Travel conflicts">
-      {conflicts.map((c) => (
-        <div key={c.id} className={styles.conflictCard}>
-          <div className={styles.conflictHead}>
-            <h2>
-              {c.away ? `${c.place} trip` : `Game vs ${c.place}`} runs into {c.courses.length} class{c.courses.length === 1 ? "" : "es"}
-            </h2>
-            <span>
-              {fmt.format(new Date(c.start))} – {fmt.format(new Date(c.end))}
-            </span>
+    <section className={styles.alerts} aria-label="Alerts">
+      {conflicts.map((c) => {
+        const id = `trip-${c.id}`;
+        const count = c.courses.reduce((n, k) => n + k.missed.length + k.due.length, 0);
+        return (
+          <div key={id} className={`${styles.alert} ${styles.alertTravel}`}>
+            <button className={styles.alertLine} onClick={() => toggle(id)} aria-expanded={open === id}>
+              <i aria-hidden />
+              <span>
+                <b>{c.away ? `${c.place} trip` : `Game vs ${c.place}`}</b> ({days(c)}) runs into {count} class{count === 1 ? "" : "es"} and deadline{count === 1 ? "" : "s"}:{" "}
+                {c.courses.map((k) => k.course).join(", ")}
+              </span>
+              <em>{open === id ? "Hide" : "Email profs"}</em>
+            </button>
+            {open === id && (
+              <ul className={styles.conflictList}>
+                {c.courses.map((k) => (
+                  <CourseRow
+                    key={k.course}
+                    trip={c}
+                    row={k}
+                    syllabus={syllabi.find((s) => courseKey(s.code) === courseKey(k.course))}
+                    tz={tz}
+                    fmt={fmt}
+                    athleteName={athleteName}
+                    sport={sport}
+                    classesHref={classesHref}
+                  />
+                ))}
+              </ul>
+            )}
           </div>
-          <ul className={styles.conflictList}>
-            {c.courses.map((k) => (
-              <CourseRow
-                key={k.course}
-                trip={c}
-                row={k}
-                syllabus={syllabi.find((s) => courseKey(s.code) === courseKey(k.course))}
-                tz={tz}
-                fmt={fmt}
-                athleteName={athleteName}
-                sport={sport}
-                classesHref={classesHref}
-              />
-            ))}
-          </ul>
+        );
+      })}
+      {notes.map((n) => (
+        <div key={n.id} className={`${styles.alert} ${n.tone === "warn" ? styles.alertWarn : styles.alertInfo}`}>
+          <button className={styles.alertLine} onClick={() => n.detail && toggle(n.id)} aria-expanded={open === n.id} disabled={!n.detail}>
+            <i aria-hidden />
+            <span>{n.text}</span>
+            {n.detail && <em>{open === n.id ? "Hide" : "Why"}</em>}
+          </button>
+          {open === n.id && n.detail && <p className={styles.alertDetail}>{n.detail}</p>}
         </div>
       ))}
     </section>
