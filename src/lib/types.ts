@@ -9,7 +9,7 @@ export type EventKind =
   | "meeting"
   | "other";
 
-/** Something already on the calendar that the planner must work around. */
+/** Something already on the calendar: part of the fixed schedule. */
 export type CalEvent = {
   id: string;
   title: string;
@@ -30,40 +30,14 @@ export type Task = {
 
 export type Settings = {
   tz: string;
+  /** When the athlete's day ends: free time isn't counted after this. */
   bedtime: string; // "23:00"
+  /** When the athlete's day starts: free time isn't counted before this. */
   wake: string; // "07:00"
-  /** Minutes of recovery kept free after a lift, practice or game. */
-  recoveryMins: number;
-  /** Longest single study session, in minutes. */
-  maxSessionMins: number;
-  /** Shortest gap worth scheduling a session in. */
-  minSessionMins: number;
-  /** Most study scheduled on any one day, in minutes. */
-  maxStudyMinsPerDay: number;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   tz: "America/New_York",
   bedtime: "23:00",
   wake: "07:00",
-  recoveryMins: 45,
-  maxSessionMins: 90,
-  minSessionMins: 30,
-  maxStudyMinsPerDay: 240,
-};
-
-export type PlanBlock = {
-  kind: "study" | "sleep";
-  title: string;
-  start: Date;
-  end: Date;
-  taskId?: string;
-};
-
-export type PlanResult = {
-  blocks: PlanBlock[];
-  /** Tasks the planner could not fully fit before their deadline. */
-  shortfalls: { taskId: string; title: string; missingMins: number }[];
-  /** Nights where fixed events run into the sleep window. */
-  sleepConflicts: { day: string; event: string }[];
 };

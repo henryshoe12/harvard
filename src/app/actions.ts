@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
-import { readPrefs, writeSettings, writeTasks } from "@/lib/prefs";
+import { readPrefs, writeSettings, writeTasks, writeWork } from "@/lib/prefs";
 import { atLocal, parseClock, parseDayKey } from "@/lib/time";
 
 export async function signInWithGoogle() {
@@ -60,5 +60,21 @@ export async function forgetMe() {
   const jar = await cookies();
   jar.delete("ot_settings");
   jar.delete("ot_tasks");
+  jar.delete("ot_work");
   redirect("/");
+}
+
+/** Saves the athlete's own hour estimates and done checkmarks from the work list. */
+export async function saveWork(form: FormData) {
+  const { work } = await readPrefs();
+  const ids = form.getAll("id").map(String);
+  const done = new Set(work.done.filter((d) => !ids.includes(d)));
+  const est = { ...work.est };
+  for (const id of ids) {
+    const h = Number(form.get(`h:${id}`));
+    if (Number.isFinite(h) && h >= 0 && h <= 100) est[id] = h;
+    if (form.get(`d:${id}`) === "on") done.add(id);
+  }
+  await writeWork({ est, done: [...done] });
+  revalidatePath("/week");
 }

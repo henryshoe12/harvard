@@ -17,6 +17,8 @@
 .main h1 {
   font-size: clamp(30px, 6vw, 46px);
   line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.025em;
 }
 
 .lead {
@@ -36,8 +38,8 @@
 .secondary {
   font: inherit;
   font-size: 15px;
-  border-radius: 10px;
-  padding: 11px 18px;
+  border-radius: 999px;
+  padding: 11px 20px;
   cursor: pointer;
   text-decoration: none;
   border: 1px solid var(--accent);
@@ -82,7 +84,7 @@
   font-size: 15px;
   padding: 9px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--card);
   color: var(--foreground);
 }

@@ -17,10 +17,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   return (
     <main className={styles.main}>
       <p className={styles.kicker}>Overtime</p>
-      <h1>Tell it your bedtime. It finds the study time.</h1>
+      <h1>Everything due. Every practice. Your free time.</h1>
       <p className={styles.lead}>
-        Overtime reads your team schedule and your Canvas deadlines, protects your sleep, and plans your study blocks around practice, lifts, film and
-        travel. When the schedule changes, it re-plans the week.
+        Overtime puts your team schedule, your classes and every assignment due in one week view, with how long each piece of work should take
+        and how much free time you actually have. You decide when to do it.
       </p>
       <div className={styles.ctas}>
         <form action={signInWithGoogle}>

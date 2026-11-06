@@ -5,7 +5,10 @@ import { DEFAULT_SETTINGS, type Settings, type Task } from "./types";
 // httpOnly cookies. Moving these to a database (Supabase) comes with team
 // accounts; nothing else in the app needs to change when that happens.
 
-export type Prefs = { settings: Settings; canvasUrl: string; teamUrl: string; tasks: Task[] };
+export type Prefs = { settings: Settings; canvasUrl: string; teamUrl: string; tasks: Task[]; work: WorkPrefs };
+
+/** The athlete's own time estimates and what they've finished, by task id. */
+export type WorkPrefs = { est: Record<string, number>; done: string[] };
 
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
@@ -29,7 +32,28 @@ export async function readPrefs(): Promise<Prefs> {
         .map((t) => ({ id: String(t.id), title: t.title, due: new Date(t.due), hours: t.hours, source: "manual" as const }));
     }
   } catch {}
-  return { settings, canvasUrl, teamUrl, tasks };
+  return { settings, canvasUrl, teamUrl, tasks, work: await readWork() };
+}
+
+async function readWork(): Promise<WorkPrefs> {
+  const jar = await cookies();
+  try {
+    const raw = JSON.parse(jar.get("ot_work")?.value ?? "{}");
+    const est: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw.est ?? {})) if (typeof v === "number" && v >= 0 && v <= 100) est[k] = v;
+    const done = Array.isArray(raw.done) ? raw.done.filter((x: unknown) => typeof x === "string") : [];
+    return { est, done };
+  } catch {
+    return { est: {}, done: [] };
+  }
+}
+
+export async function writeWork(work: WorkPrefs) {
+  const jar = await cookies();
+  // Keep the cookie small: the most recent 80 entries of each.
+  const est = Object.fromEntries(Object.entries(work.est).slice(-80));
+  const done = work.done.slice(-80);
+  jar.set("ot_work", JSON.stringify({ est, done }), { httpOnly: true, sameSite: "lax", secure: true, maxAge: ONE_YEAR, path: "/" });
 }
 
 export async function writeSettings(s: Partial<Settings> & { canvasUrl?: string; teamUrl?: string }) {
@@ -60,10 +84,6 @@ function pick(raw: Record<string, unknown>): Partial<Settings> {
       new Intl.DateTimeFormat("en-US", { timeZone: raw.tz });
       out.tz = raw.tz;
     } catch {}
-  }
-  for (const k of ["recoveryMins", "maxSessionMins", "minSessionMins", "maxStudyMinsPerDay"] as const) {
-    const v = Number(raw[k]);
-    if (Number.isFinite(v) && v >= 0 && v <= 600) out[k] = v;
   }
   return out;
 }

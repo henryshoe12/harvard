@@ -16,6 +16,3 @@ export function classify(title: string): EventKind {
   for (const [kind, re] of RULES) if (re.test(title)) return kind;
   return "other";
 }
-
-/** Kinds after which the body needs recovery time before focused study (a long bus ride counts). */
-export const NEEDS_RECOVERY: EventKind[] = ["lift", "practice", "game", "travel"];
