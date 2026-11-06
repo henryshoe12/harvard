@@ -1,0 +1,212 @@
+import { connection } from "next/server";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { addTask, removeTask, saveSettings, signOutAction } from "@/app/actions";
+import { canvasTasks } from "@/lib/canvas";
+import { demoEvents, demoTasks } from "@/lib/demo";
+import { listEvents } from "@/lib/google";
+import { planWeek } from "@/lib/planner";
+import { readPrefs } from "@/lib/prefs";
+import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/lib/time";
+import type { CalEvent, Task } from "@/lib/types";
+import { WeekGrid } from "./WeekGrid";
+import styles from "./week.module.css";
+
+export const metadata = { title: "Your week · Overtime" };
+
+// Every view reads the session and the athlete's own calendar, so render on request.
+export const instant = false;
+
+export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; demo?: string }> }) {
+  await connection();
+  const { w, demo: demoParam } = await searchParams;
+  const demo = demoParam === "1";
+  const session = demo ? null : await auth();
+  if (!demo && !session) redirect("/");
+
+  const { settings, canvasUrl, tasks: manualTasks } = await readPrefs();
+  const tz = settings.tz;
+  const monday = weekStart(w && /^\d{4}-\d{2}-\d{2}$/.test(w) ? parseDayKey(w) : localDay(new Date(), tz));
+  const from = atLocal(monday, 0, tz);
+  const to = atLocal(addDays(monday, 7), 12 * 60, tz); // a little past Sunday so Monday's 6am event shapes Sunday night
+
+  let events: CalEvent[] = [];
+  let tasks: Task[] = [...manualTasks];
+  const problems: string[] = [];
+
+  if (demo) {
+    events = demoEvents(monday, tz);
+    tasks.push(...demoTasks(monday, tz));
+  } else {
+    if (!session?.accessToken || session.error) {
+      problems.push("Your Google sign-in expired. Sign out and back in.");
+    } else {
+      try {
+        events = await listEvents(session.accessToken, from, to);
+      } catch (e) {
+        problems.push(`Couldn't read Google Calendar (${(e as Error).message}).`);
+      }
+    }
+    if (canvasUrl) {
+      try {
+        tasks.push(...(await canvasTasks(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz))));
+      } catch (e) {
+        problems.push(`Couldn't read your Canvas feed: ${(e as Error).message}`);
+      }
+    }
+  }
+  tasks = tasks.filter((t) => t.due > from);
+
+  const plan = planWeek({ start: monday, events, tasks, settings, now: demo ? from : new Date() });
+  const hours = (kind: "study" | "sleep") =>
+    plan.blocks.filter((b) => b.kind === kind).reduce((n, b) => n + (b.end.getTime() - b.start.getTime()) / 3600000, 0);
+  const sleepNights = plan.blocks.filter((b) => b.kind === "sleep").length;
+  const fmtDue = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const q = (week: string) => `/week?w=${week}${demo ? "&demo=1" : ""}`;
+
+  return (
+    <main className={styles.page}>
+      <header className={styles.top}>
+        <h1>
+          Week of {monday.m}/{monday.d}
+        </h1>
+        <nav className={styles.nav}>
+          <Link className={styles.btn} href={q(dayKey(addDays(monday, -7)))}>
+            ← Prev
+          </Link>
+          <Link className={styles.btn} href={demo ? "/week?demo=1" : "/week"}>
+            This week
+          </Link>
+          <Link className={styles.btn} href={q(dayKey(addDays(monday, 7)))}>
+            Next →
+          </Link>
+          {demo ? (
+            <Link className={styles.btnPrimary} href="/">
+              Use my calendar
+            </Link>
+          ) : (
+            <form action={signOutAction}>
+              <button className={styles.btn}>Sign out</button>
+            </form>
+          )}
+        </nav>
+      </header>
+
+      {demo && <div className={styles.banner}>Demo week: a sample in-season football schedule. Sign in to plan your own.</div>}
+      {problems.map((p) => (
+        <div key={p} className={styles.warn}>
+          {p}
+        </div>
+      ))}
+      {plan.sleepConflicts.map((c, i) => (
+        <div key={`s${i}`} className={styles.warn}>
+          {c.event} runs into your sleep on the night of {c.day}. Consider asking about it or going to bed right after.
+        </div>
+      ))}
+      {plan.shortfalls.map((s) => (
+        <div key={s.taskId} className={styles.warn}>
+          Not enough free time for {s.title}: about {Math.ceil(s.missingMins / 30) / 2} more hours needed before it&apos;s due.
+        </div>
+      ))}
+
+      <div className={styles.layout}>
+        <section style={{ display: "grid", gap: 12 }}>
+          <div className={styles.stats}>
+            <div className={styles.stat}>
+              <b>{(hours("sleep") / sleepNights).toFixed(1)}h</b>
+              <span>sleep protected per night</span>
+            </div>
+            <div className={styles.stat}>
+              <b>{hours("study").toFixed(1)}h</b>
+              <span>study time planned</span>
+            </div>
+            <div className={styles.stat}>
+              <b>{events.filter((e) => ["practice", "lift", "game", "film", "treatment", "travel"].includes(e.kind)).length}</b>
+              <span>team events worked around</span>
+            </div>
+          </div>
+          <div className={styles.gridWrap}>
+            <WeekGrid monday={monday} tz={tz} events={events} blocks={plan.blocks} />
+          </div>
+        </section>
+
+        <aside className={styles.side}>
+          <div className={styles.card}>
+            <h2>Coursework ({tasks.length})</h2>
+            <ul className={styles.taskList}>
+              {[...tasks]
+                .sort((a, b) => a.due.getTime() - b.due.getTime())
+                .map((t) => (
+                  <li key={t.id}>
+                    <div>
+                      {t.title}
+                      <small>
+                        due {fmtDue.format(t.due)} · {t.hours}h{t.source === "canvas" ? " · Canvas" : ""}
+                      </small>
+                    </div>
+                    {t.source === "manual" && (
+                      <form action={removeTask}>
+                        <input type="hidden" name="id" value={t.id} />
+                        <button className={styles.x} aria-label={`Remove ${t.title}`}>
+                          ×
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+            </ul>
+            <form action={addTask} style={{ display: "grid", gap: 8 }}>
+              <label>
+                Add something to study for
+                <input name="title" placeholder="e.g. Math 21A midterm" required />
+              </label>
+              <div className={styles.row}>
+                <label>
+                  Due
+                  <input name="dueDay" type="date" required defaultValue={dayKey(addDays(monday, 4))} />
+                </label>
+                <label>
+                  Time
+                  <input name="dueTime" type="time" defaultValue="23:59" />
+                </label>
+              </div>
+              <label>
+                Hours of work
+                <input name="hours" type="number" min="0.5" max="40" step="0.5" defaultValue="2" required />
+              </label>
+              <button className={styles.btnPrimary}>Add and re-plan</button>
+            </form>
+          </div>
+
+          <div className={styles.card}>
+            <h2>Sleep and sources</h2>
+            <form action={saveSettings} style={{ display: "grid", gap: 8 }}>
+              <div className={styles.row}>
+                <label>
+                  Bedtime
+                  <input name="bedtime" type="time" defaultValue={settings.bedtime} />
+                </label>
+                <label>
+                  Wake up
+                  <input name="wake" type="time" defaultValue={settings.wake} />
+                </label>
+              </div>
+              <input type="hidden" name="tz" value={tz} />
+              {!demo && (
+                <label>
+                  Canvas calendar feed link
+                  <input name="canvasUrl" type="url" placeholder="https://canvas.harvard.edu/feeds/calendars/…" defaultValue={canvasUrl} />
+                </label>
+              )}
+              <button className={styles.btn}>Save and re-plan</button>
+            </form>
+            <p className={styles.hint}>
+              Early morning on the calendar? The night before moves earlier so you keep the same hours of sleep. In Canvas, the feed link is under Calendar → Calendar Feed.
+            </p>
+          </div>
+        </aside>
+      </div>
+    </main>
+  );
+}
