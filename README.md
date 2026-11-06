@@ -7,7 +7,7 @@ A planner for student athletes. It reads your team schedule (Google Calendar) an
 ## What it does today
 
 - **Sleep first.** Every night from your bedtime to your wake time is blocked. If something starts early (a 6am lift), that night moves earlier so you keep the same hours of sleep. Events that run into the night are flagged.
-- **Works around the team schedule.** Reads every Google calendar you have turned on, so a shared team calendar counts. Keeps 45 minutes of recovery after lifts, practice, games and travel, and 15 minutes to get to each event.
+- **Works around the team schedule.** Reads every Google calendar you have turned on, so a Teamworks or shared team calendar counts. Items from a Canvas calendar subscribed in Google become deadlines to study for, not busy time. Keeps 45 minutes of recovery after lifts, practice, games and travel, and 15 minutes to get to each event.
 - **Plans study time.** Coursework comes from your Canvas calendar feed or is added by hand. Sessions are 30 to 90 minutes, earliest deadline first, at most 4 hours of study a day, nothing in the first 30 minutes after waking or the last 30 before bed.
 - **Tells you when it won't fit.** If a deadline can't be met in the free time you have, it says how many hours are missing.
 

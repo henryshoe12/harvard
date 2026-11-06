@@ -1,0 +1,260 @@
+.page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+  display: grid;
+  gap: 20px;
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.top h1 {
+  font-size: 22px;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--foreground);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btnPrimary {
+  composes: btn;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.banner {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.warn {
+  composes: banner;
+  border-color: #d97706;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.stat {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.stat b {
+  display: block;
+  font-size: 22px;
+}
+
+.stat span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.gridWrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 36px repeat(7, minmax(96px, 1fr));
+  min-width: 720px;
+}
+
+.hours {
+  position: relative;
+  margin-top: 36px;
+}
+
+.hourLabel {
+  position: absolute;
+  right: 4px;
+  font-size: 10px;
+  color: var(--muted);
+  transform: translateY(-6px);
+}
+
+.day {
+  border-left: 1px solid var(--line);
+}
+
+.dayHead {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dayHead span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.dayBody {
+  position: relative;
+}
+
+.line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--grid);
+}
+
+.block {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  border-radius: 6px;
+  padding: 2px 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  border-left: 3px solid;
+}
+
+.block strong {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block small {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+/* Fixed events: athletics in warm tones, academics in blue. */
+.k_practice, .k_lift, .k_game { background: #fde8d7; border-color: #ea580c; color: #7c2d12; }
+.k_film, .k_treatment, .k_meeting { background: #fdf0d3; border-color: #ca8a04; color: #713f12; }
+.k_travel { background: #ece7f6; border-color: #7c3aed; color: #3b1c72; }
+.k_class { background: #dbe9fb; border-color: #2563eb; color: #1e3a8a; }
+.k_other { background: #eceef1; border-color: #6b7280; color: #374151; }
+
+/* What the planner adds. */
+.study { background: #d9f3e3; border-color: #16a34a; color: #14532d; border-left-style: dashed; }
+.sleep { background: #1e2a4a; border-color: #6d83c9; color: #dfe6fb; }
+
+.side {
+  display: grid;
+  gap: 16px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 10px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.card h2 {
+  font-size: 15px;
+}
+
+.card label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card input {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  width: 100%;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.taskList {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.taskList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: start;
+}
+
+.taskList small {
+  display: block;
+  color: var(--muted);
+}
+
+.x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+}

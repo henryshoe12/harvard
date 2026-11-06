@@ -1,0 +1,35 @@
+import { connection } from "next/server";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { signInWithGoogle } from "./actions";
+import styles from "./home.module.css";
+
+// Every view reads the session and the athlete's own calendar, so render on request.
+export const instant = false;
+
+export default async function Home() {
+  await connection();
+  const session = await auth().catch(() => null); // no auth config yet: still show the page and demo
+  if (session) redirect("/week");
+
+  return (
+    <main className={styles.main}>
+      <p className={styles.kicker}>Overtime</p>
+      <h1>Tell it your bedtime. It finds the study time.</h1>
+      <p className={styles.lead}>
+        Overtime reads your team schedule and your Canvas deadlines, protects your sleep, and plans your study blocks around practice, lifts, film and
+        travel. When the schedule changes, it re-plans the week.
+      </p>
+      <div className={styles.ctas}>
+        <form action={signInWithGoogle}>
+          <button className={styles.primary}>Sign in with Google</button>
+        </form>
+        <Link className={styles.secondary} href="/week?demo=1">
+          Try a demo week
+        </Link>
+      </div>
+      <p className={styles.fine}>Overtime only reads your calendar. It never changes or shares it.</p>
+    </main>
+  );
+}
