@@ -1,3 +1,4 @@
+import type { ClassGrades } from "./grades";
 import type { Syllabus } from "./syllabus";
 
 // Sample syllabi for the demo, dated around the current week so they line up with
@@ -87,4 +88,12 @@ export function demoSyllabi(): Syllabus[] {
   ];
   memo = { key, list };
   return list;
+}
+
+/** Sample scores for the demo classes. */
+export function demoGrades(): Record<string, ClassGrades> {
+  return {
+    "ec-10": { credits: 4, scores: { "Problem sets": [92, 88, 95, 100], "Section participation": [95] } },
+    "math-21a": { credits: 4, scores: { "Problem sets": [85, 78, 90, 82, 88, 91, 80], "Midterms (2)": [76] } },
+  };
 }

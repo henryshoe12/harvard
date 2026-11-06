@@ -169,3 +169,25 @@ describe("email drafts", () => {
     expect(composeLinks("a@b.edu", "Hi there", "Line 1\nLine 2").mail).toBe("mailto:a%40b.edu?subject=Hi%20there&body=Line%201%0ALine%202");
   });
 });
+
+describe("grades", () => {
+  const grading = [
+    { item: "Problem sets", weight: "20%" },
+    { item: "Midterm", weight: "30%" },
+    { item: "Final exam", weight: "50%" },
+  ];
+  it("weights only the categories with scores so far", async () => {
+    const { classGrade, neededFor, parseScores, termGpa, letterFor } = await import("../grades");
+    expect(parseScores("92, 85/100 18/20 abc")).toEqual([92, 85, 90]);
+    const g = { scores: { "Problem sets": [90, 100], Midterm: [80] }, credits: 4 };
+    const r = classGrade(grading, g);
+    expect(r.current).toBeCloseTo((0.2 * 95 + 0.3 * 80) / 0.5); // 86
+    expect(r.letter).toBe("B");
+    expect(r.graded).toBeCloseTo(50);
+    // 90 overall (A-) needs (90 - 43) / 0.5 = 94 on the final.
+    expect(neededFor(90, grading, g)).toBeCloseTo(94);
+    expect(classGrade(grading, undefined).current).toBeNull();
+    expect(termGpa([{ points: 4, credits: 4 }, { points: 3, credits: 4 }, { points: null, credits: 4 }])).toBe(3.5);
+    expect(letterFor(89.9).letter).toBe("B+");
+  });
+});
