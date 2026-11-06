@@ -1,14 +1,19 @@
+import { unplanSession } from "@/app/actions";
 import type { FreeBlock } from "@/lib/freetime";
 import { addDays, atLocal, dayKey, type LocalDay } from "@/lib/time";
 import type { CalEvent, Task } from "@/lib/types";
+import { FreeSlot } from "./FreeSlot";
 import styles from "./week.module.css";
+
+/** A work session placed on the calendar. */
+export type PlannedBlock = { taskId: string; title: string; start: Date; end: Date };
 
 const START_HOUR = 6;
 const END_HOUR = 24;
 const PX_PER_HOUR = 46;
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-type Item = { key: string; title: string; start: Date; end: Date; cls: string; label?: string; minH?: number };
+type Item = { key: string; title: string; start: Date; end: Date; cls: string; label?: string; minH?: number; kind?: "free" | "plan"; taskId?: string };
 
 /** A day or a week: fixed schedule, deadlines as small markers, and (optionally) free time. */
 export function WeekGrid({
@@ -18,6 +23,8 @@ export function WeekGrid({
   events,
   free,
   due,
+  planned = [],
+  placing,
   today,
 }: {
   start: LocalDay;
@@ -26,6 +33,9 @@ export function WeekGrid({
   events: CalEvent[];
   free: FreeBlock[];
   due: Task[];
+  planned?: PlannedBlock[];
+  /** While planning a task: free gaps become clickable and drop a session of `mins`. */
+  placing?: { taskId: string; mins: number };
   today?: string;
 }) {
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
@@ -42,7 +52,17 @@ export function WeekGrid({
   const freeLabel = (a: Date, b: Date) => `${Math.round(((b.getTime() - a.getTime()) / 3600000) * 2) / 2}h free`;
 
   const items: Item[] = [
-    ...free.map((f, i) => ({ key: `f-${i}`, title: freeLabel(f.start, f.end), start: f.start, end: f.end, cls: styles.free, label: range(f.start, f.end) })),
+    ...free.map((f, i) => ({ key: `f-${i}`, title: freeLabel(f.start, f.end), start: f.start, end: f.end, cls: styles.free, label: range(f.start, f.end), kind: "free" as const })),
+    ...planned.map((p) => ({
+      key: `p-${p.taskId}-${p.start.getTime()}`,
+      title: p.title,
+      start: p.start,
+      end: p.end,
+      cls: styles.planned,
+      label: range(p.start, p.end),
+      kind: "plan" as const,
+      taskId: p.taskId,
+    })),
     ...events
       .filter((e) => !e.allDay)
       .map((e) => ({ key: `e-${e.id}`, title: e.title, start: e.start, end: e.end, cls: styles[`k_${e.kind}`] ?? styles.k_other, label: range(e.start, e.end) })),
@@ -91,6 +111,35 @@ export function WeekGrid({
                   const e = Math.min(it.end.getTime(), bottom);
                   const y = ((s - top) / 3600000) * PX_PER_HOUR;
                   const h = Math.max(((e - s) / 3600000) * PX_PER_HOUR, it.minH ?? 14);
+                  if (it.kind === "free" && placing) {
+                    return (
+                      <FreeSlot
+                        key={it.key}
+                        start={new Date(s).toISOString()}
+                        end={new Date(e).toISOString()}
+                        top={y}
+                        height={h}
+                        pxPerHour={PX_PER_HOUR}
+                        title={it.title}
+                        label={it.label ?? ""}
+                        taskId={placing.taskId}
+                        mins={placing.mins}
+                      />
+                    );
+                  }
+                  if (it.kind === "plan") {
+                    return (
+                      <div key={it.key} className={`${styles.block} ${it.cls}`} style={{ top: y, height: h }} title={`${it.title} · ${it.label}`}>
+                        <strong>{it.title}</strong>
+                        {h > 30 && <small>{it.label}</small>}
+                        <form action={unplanSession} className={styles.unplan}>
+                          <input type="hidden" name="taskId" value={it.taskId} />
+                          <input type="hidden" name="start" value={it.start.getTime()} />
+                          <button aria-label={`Remove ${it.title} session`}>×</button>
+                        </form>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={it.key} className={`${styles.block} ${it.cls}`} style={{ top: y, height: h }} title={it.label ? `${it.title} · ${it.label}` : it.title}>
                       <strong>{it.title}</strong>

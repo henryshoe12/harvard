@@ -967,3 +967,119 @@
     font-size: 9.5px;
   }
 }
+
+/* Planned work sessions: solid, calm crimson-tinted blocks the athlete placed. */
+.planned {
+  background: #f7e7ea;
+  color: #7d2434;
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-right: 18px;
+}
+
+.unplan {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+.unplan button {
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.unplan button:hover {
+  opacity: 1;
+}
+
+.dotPlanned {
+  background: #e7b9c2;
+}
+
+.freePick {
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: copy;
+  display: block;
+  width: auto;
+}
+
+.freePick:hover {
+  box-shadow: inset 0 0 0 2px #5fae84;
+}
+
+.ghost {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 8px;
+  background: rgba(180, 58, 76, 0.18);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  pointer-events: none;
+}
+
+.planBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 12px 16px;
+  border-left: 4px solid var(--accent);
+}
+
+.planBar > div:first-child {
+  flex: 1 1 260px;
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.planBar > div:first-child span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.lenRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.lenRow a {
+  text-decoration: none;
+}
+
+.lenNote {
+  font-size: 12.5px;
+}
+
+.planBtn {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.planBtn:hover,
+.planBtnOn {
+  background: var(--accent-soft);
+  border-color: transparent;
+}

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
-import { readPrefs, writeSettings, writeTasks, writeWork } from "@/lib/prefs";
+import { readPrefs, writePlan, writeSettings, writeTasks, writeWork } from "@/lib/prefs";
 import { atLocal, parseClock, parseDayKey } from "@/lib/time";
 
 export async function signInWithGoogle() {
@@ -63,6 +63,7 @@ export async function forgetMe() {
   jar.delete("ot_settings");
   jar.delete("ot_tasks");
   jar.delete("ot_work");
+  jar.delete("ot_plan");
   redirect("/");
 }
 
@@ -78,5 +79,22 @@ export async function saveWork(form: FormData) {
     if (form.get(`d:${id}`) === "on") done.add(id);
   }
   await writeWork({ est, done: [...done] });
+  revalidatePath("/week");
+}
+
+/** Puts a work session for a task into a free slot the athlete picked. */
+export async function planSession(taskId: string, startIso: string, mins: number) {
+  const start = new Date(startIso);
+  if (!taskId || Number.isNaN(start.getTime()) || !(mins > 0 && mins <= 12 * 60)) return;
+  const { plan } = await readPrefs();
+  await writePlan([...plan, { taskId, start, mins: Math.round(mins) }]);
+  revalidatePath("/week");
+}
+
+export async function unplanSession(form: FormData) {
+  const taskId = String(form.get("taskId") ?? "");
+  const start = Number(form.get("start"));
+  const { plan } = await readPrefs();
+  await writePlan(plan.filter((p) => !(p.taskId === taskId && p.start.getTime() === start)));
   revalidatePath("/week");
 }

@@ -5,7 +5,10 @@ import { DEFAULT_SETTINGS, type Settings, type Task } from "./types";
 // httpOnly cookies. Moving these to a database (Supabase) comes with team
 // accounts; nothing else in the app needs to change when that happens.
 
-export type Prefs = { settings: Settings; canvasUrl: string; teamUrl: string; tasks: Task[]; work: WorkPrefs };
+export type Prefs = { settings: Settings; canvasUrl: string; teamUrl: string; tasks: Task[]; work: WorkPrefs; plan: Session[] };
+
+/** A work session the athlete placed in their free time: part (or all) of a task. */
+export type Session = { taskId: string; start: Date; mins: number };
 
 /** The athlete's own time estimates and what they've finished, by task id. */
 export type WorkPrefs = { est: Record<string, number>; done: string[] };
@@ -32,7 +35,33 @@ export async function readPrefs(): Promise<Prefs> {
         .map((t) => ({ id: String(t.id), title: t.title, due: new Date(t.due), hours: t.hours, source: "manual" as const }));
     }
   } catch {}
-  return { settings, canvasUrl, teamUrl, tasks, work: await readWork() };
+  return { settings, canvasUrl, teamUrl, tasks, work: await readWork(), plan: await readPlan() };
+}
+
+async function readPlan(): Promise<Session[]> {
+  const jar = await cookies();
+  try {
+    const raw = JSON.parse(jar.get("ot_plan")?.value ?? "[]");
+    if (!Array.isArray(raw)) return [];
+    // Stored compactly as [taskId, start in epoch minutes, minutes].
+    return raw
+      .filter((r) => Array.isArray(r) && typeof r[0] === "string" && typeof r[1] === "number" && typeof r[2] === "number" && r[2] > 0 && r[2] <= 12 * 60)
+      .map((r) => ({ taskId: r[0], start: new Date(r[1] * 60000), mins: r[2] }));
+  } catch {
+    return [];
+  }
+}
+
+export async function writePlan(plan: Session[]) {
+  const jar = await cookies();
+  // Keep it small enough for a cookie: drop sessions over a week old, then keep the latest 50.
+  const weekAgo = Date.now() - 7 * 86400000;
+  const keep = plan
+    .filter((p) => p.start.getTime() > weekAgo)
+    .sort((a, b) => a.start.getTime() - b.start.getTime())
+    .slice(-50)
+    .map((p) => [p.taskId.slice(0, 80), Math.round(p.start.getTime() / 60000), p.mins]);
+  jar.set("ot_plan", JSON.stringify(keep), { httpOnly: true, sameSite: "lax", secure: true, maxAge: ONE_YEAR, path: "/" });
 }
 
 async function readWork(): Promise<WorkPrefs> {

@@ -34,7 +34,12 @@ export const SyllabusSchema = z.object({
         date: z.string().describe("YYYY-MM-DD"),
         time: z.string().nullable().describe("HH:MM, 24-hour, if the syllabus gives one"),
         type: z.enum(["assignment", "exam", "quiz", "project", "reading", "other"]),
-        hours: z.number().nullable().describe("A rough guess at hours of work for a typical student, or null for readings and events"),
+        hours: z
+          .number()
+          .nullable()
+          .describe(
+            "Your estimate of the average hours a typical student spends to complete it (for an exam: hours of studying), based on its size and weight in the course. Give a number for every assignment, project, quiz and exam; null only for readings and events.",
+          ),
       }),
     )
     .describe("Every dated deadline, exam and quiz in the syllabus, in date order"),
