@@ -137,8 +137,38 @@ describe("planWeek", () => {
 
 describe("Canvas titles", () => {
   it("puts the course first", async () => {
-    const { cleanCanvasTitle } = await import("../google");
+    const { cleanCanvasTitle } = await import("../canvas");
     expect(cleanCanvasTitle("Problem Set 8 [MATH 21A]")).toBe("MATH 21A: Problem Set 8");
     expect(cleanCanvasTitle("Lift")).toBe("Lift");
+  });
+});
+
+describe("calendar feed links", () => {
+  it("expands weekly repeating practices and skips cancelled dates", async () => {
+    const { parseFeed } = await import("../ics");
+    const ics = [
+      "BEGIN:VCALENDAR", "VERSION:2.0",
+      "BEGIN:VEVENT", "UID:prac", "SUMMARY:Practice",
+      "DTSTART:20261102T200000Z", "DTEND:20261102T230000Z",
+      "RRULE:FREQ=WEEKLY;BYDAY=MO,WE", "EXDATE:20261111T200000Z",
+      "END:VEVENT",
+      "BEGIN:VEVENT", "UID:one", "SUMMARY:Travel to Penn",
+      "DTSTART:20261113T200000Z", "DTEND:20261114T020000Z",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const items = parseFeed(ics, new Date("2026-11-09T05:00:00Z"), new Date("2026-11-16T05:00:00Z"));
+    expect(items.map((i) => [i.title, i.start.toISOString()])).toEqual([
+      ["Practice", "2026-11-09T20:00:00.000Z"],
+      ["Travel to Penn", "2026-11-13T20:00:00.000Z"],
+    ]);
+  });
+
+  it("only accepts public https links", async () => {
+    const { checkFeedUrl } = await import("../ics");
+    expect(checkFeedUrl("webcal://canvas.harvard.edu/feeds/calendars/user_x.ics").href).toBe("https://canvas.harvard.edu/feeds/calendars/user_x.ics");
+    for (const bad of ["http://example.com/a.ics", "https://127.0.0.1/a.ics", "https://localhost/a.ics", "https://[::1]/a.ics", "not a url"]) {
+      expect(() => checkFeedUrl(bad)).toThrow();
+    }
   });
 });

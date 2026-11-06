@@ -1,5 +1,7 @@
-import ical from "node-ical";
-import type { Task } from "./types";
+import { classify } from "./classify";
+import { fetchFeed } from "./ics";
+import { atLocal, localDay } from "./time";
+import type { CalEvent, Task } from "./types";
 
 /** Rough hours to plan for a Canvas item, from its title. Editable later. */
 export function estimateHours(title: string): number {
@@ -10,27 +12,24 @@ export function estimateHours(title: string): number {
   return 2;
 }
 
-/**
- * Upcoming assignments from a Canvas calendar feed (Canvas > Calendar >
- * Calendar Feed). Only https URLs on instructure.com or a .edu domain are
- * accepted so the server can't be pointed at arbitrary hosts.
- */
-export async function canvasTasks(feedUrl: string, from: Date, to: Date): Promise<Task[]> {
-  const url = new URL(feedUrl.replace(/^webcal:/, "https:"));
-  if (url.protocol !== "https:" || !/(\.instructure\.com|\.edu)$/i.test(url.hostname)) {
-    throw new Error("That doesn't look like a Canvas calendar feed link.");
-  }
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Canvas feed error ${res.status}`);
-  const data = ical.sync.parseICS(await res.text());
+/** Canvas titles look like "Problem Set 8 [MATH 21A]"; show the course first. */
+export function cleanCanvasTitle(title: string): string {
+  const m = title.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+  return m ? `${m[2]}: ${m[1]}` : title;
+}
 
-  const tasks: Task[] = [];
-  for (const item of Object.values(data)) {
-    if (!item || item.type !== "VEVENT") continue;
-    const due = item.end ?? item.start;
-    if (!due || due < from || due > to) continue;
-    const title = String(typeof item.summary === "string" ? item.summary : (item.summary as { val?: string })?.val ?? "Assignment");
-    tasks.push({ id: `canvas-${item.uid}`, title, due: new Date(due), hours: estimateHours(title), source: "canvas" });
-  }
-  return tasks;
+/** Upcoming assignments from a Canvas calendar feed (Canvas > Calendar > Calendar Feed). */
+export async function canvasTasks(feedUrl: string, from: Date, to: Date, tz: string): Promise<Task[]> {
+  const items = await fetchFeed(feedUrl, from, to);
+  return items.map((it) => {
+    // All-day Canvas items are due by the end of that day.
+    const due = it.allDay ? atLocal(localDay(new Date(it.start.getTime() + 12 * 3600000), "UTC"), 23 * 60 + 59, tz) : it.end;
+    return { id: `canvas-${it.uid}`, title: cleanCanvasTitle(it.title), due, hours: estimateHours(it.title), source: "canvas" as const };
+  });
+}
+
+/** Team schedule from a Teamworks (or any) calendar feed link. */
+export async function feedEvents(feedUrl: string, from: Date, to: Date): Promise<CalEvent[]> {
+  const items = await fetchFeed(feedUrl, from, to);
+  return items.map((it) => ({ id: `feed-${it.uid}`, title: it.title, start: it.start, end: it.end, kind: classify(it.title), allDay: it.allDay }));
 }

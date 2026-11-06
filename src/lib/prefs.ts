@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, type Settings, type Task } from "./types";
 // httpOnly cookies. Moving these to a database (Supabase) comes with team
 // accounts; nothing else in the app needs to change when that happens.
 
-export type Prefs = { settings: Settings; canvasUrl: string; tasks: Task[] };
+export type Prefs = { settings: Settings; canvasUrl: string; teamUrl: string; tasks: Task[] };
 
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
@@ -13,11 +13,13 @@ export async function readPrefs(): Promise<Prefs> {
   const jar = await cookies();
   let settings = DEFAULT_SETTINGS;
   let canvasUrl = "";
+  let teamUrl = "";
   let tasks: Task[] = [];
   try {
     const raw = JSON.parse(jar.get("ot_settings")?.value ?? "{}");
     settings = { ...DEFAULT_SETTINGS, ...pick(raw) };
     canvasUrl = typeof raw.canvasUrl === "string" ? raw.canvasUrl : "";
+    teamUrl = typeof raw.teamUrl === "string" ? raw.teamUrl : "";
   } catch {}
   try {
     const raw = JSON.parse(jar.get("ot_tasks")?.value ?? "[]");
@@ -27,13 +29,17 @@ export async function readPrefs(): Promise<Prefs> {
         .map((t) => ({ id: String(t.id), title: t.title, due: new Date(t.due), hours: t.hours, source: "manual" as const }));
     }
   } catch {}
-  return { settings, canvasUrl, tasks };
+  return { settings, canvasUrl, teamUrl, tasks };
 }
 
-export async function writeSettings(s: Partial<Settings> & { canvasUrl?: string }) {
+export async function writeSettings(s: Partial<Settings> & { canvasUrl?: string; teamUrl?: string }) {
   const jar = await cookies();
   const current = await readPrefs();
-  const next = { ...pick({ ...current.settings, ...s }), canvasUrl: s.canvasUrl ?? current.canvasUrl };
+  const next = {
+    ...pick({ ...current.settings, ...s }),
+    canvasUrl: s.canvasUrl ?? current.canvasUrl,
+    teamUrl: s.teamUrl ?? current.teamUrl,
+  };
   jar.set("ot_settings", JSON.stringify(next), { httpOnly: true, sameSite: "lax", secure: true, maxAge: ONE_YEAR, path: "/" });
 }
 

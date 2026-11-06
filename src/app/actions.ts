@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
 import { readPrefs, writeSettings, writeTasks } from "@/lib/prefs";
 import { atLocal, parseClock, parseDayKey } from "@/lib/time";
@@ -18,9 +20,20 @@ export async function saveSettings(form: FormData) {
     bedtime: String(form.get("bedtime") ?? ""),
     wake: String(form.get("wake") ?? ""),
     tz: String(form.get("tz") ?? "") || undefined,
-    canvasUrl: String(form.get("canvasUrl") ?? "").trim(),
+    canvasUrl: form.has("canvasUrl") ? String(form.get("canvasUrl")).trim() : undefined,
+    teamUrl: form.has("teamUrl") ? String(form.get("teamUrl")).trim() : undefined,
   });
   revalidatePath("/week");
+}
+
+/** Start without Google: save the Teamworks and Canvas links and open the week. */
+export async function startWithLinks(form: FormData) {
+  const teamUrl = String(form.get("teamUrl") ?? "").trim();
+  const canvasUrl = String(form.get("canvasUrl") ?? "").trim();
+  if (!teamUrl && !canvasUrl) redirect("/?error=links");
+  const tz = String(form.get("tz") ?? "");
+  await writeSettings({ teamUrl, canvasUrl, tz: tz || undefined });
+  redirect("/week");
 }
 
 export async function addTask(form: FormData) {
@@ -40,4 +53,12 @@ export async function removeTask(form: FormData) {
   const { tasks } = await readPrefs();
   await writeTasks(tasks.filter((t) => t.id !== id));
   revalidatePath("/week");
+}
+
+/** Clears this browser's saved links, settings and tasks. */
+export async function forgetMe() {
+  const jar = await cookies();
+  jar.delete("ot_settings");
+  jar.delete("ot_tasks");
+  redirect("/");
 }

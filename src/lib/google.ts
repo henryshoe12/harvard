@@ -1,5 +1,5 @@
 import { classify } from "./classify";
-import { estimateHours } from "./canvas";
+import { cleanCanvasTitle, estimateHours } from "./canvas";
 import { atLocal, parseDayKey } from "./time";
 import type { CalEvent, Task } from "./types";
 
@@ -76,9 +76,3 @@ export async function listCalendar(accessToken: string, from: Date, to: Date, tz
 }
 
 const CANVAS = /canvas|instructure/i;
-
-/** Canvas titles look like "Problem Set 8 [MATH 21A]"; show the course first. */
-export function cleanCanvasTitle(title: string): string {
-  const m = title.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
-  return m ? `${m[2]}: ${m[1]}` : title;
-}

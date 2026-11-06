@@ -2,8 +2,8 @@ import { connection } from "next/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { addTask, removeTask, saveSettings, signOutAction } from "@/app/actions";
-import { canvasTasks } from "@/lib/canvas";
+import { addTask, forgetMe, removeTask, saveSettings, signOutAction } from "@/app/actions";
+import { canvasTasks, feedEvents } from "@/lib/canvas";
 import { demoEvents, demoTasks } from "@/lib/demo";
 import { listCalendar } from "@/lib/google";
 import { planWeek } from "@/lib/planner";
@@ -22,10 +22,10 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
   await connection();
   const { w, demo: demoParam } = await searchParams;
   const demo = demoParam === "1";
-  const session = demo ? null : await auth();
-  if (!demo && !session) redirect("/");
-
-  const { settings, canvasUrl, tasks: manualTasks } = await readPrefs();
+  const session = demo ? null : await auth().catch(() => null);
+  const { settings, canvasUrl, teamUrl, tasks: manualTasks } = await readPrefs();
+  // Signed in with Google, or set up with calendar links only (schools that block Google apps).
+  if (!demo && !session && !teamUrl && !canvasUrl) redirect("/");
   const tz = settings.tz;
   const monday = weekStart(w && /^\d{4}-\d{2}-\d{2}$/.test(w) ? parseDayKey(w) : localDay(new Date(), tz));
   const from = atLocal(monday, 0, tz);
@@ -39,9 +39,9 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     events = demoEvents(monday, tz);
     tasks.push(...demoTasks(monday, tz));
   } else {
-    if (!session?.accessToken || session.error) {
+    if (session && (!session.accessToken || session.error)) {
       problems.push("Your Google sign-in expired. Sign out and back in.");
-    } else {
+    } else if (session?.accessToken) {
       try {
         // Canvas deadlines are looked up three weeks ahead so a midterm next week shapes this week.
         const cal = await listCalendar(session.accessToken, from, atLocal(addDays(monday, 21), 0, tz), tz);
@@ -53,9 +53,17 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     }
     if (canvasUrl) {
       try {
-        tasks.push(...(await canvasTasks(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz))));
+        tasks.push(...(await canvasTasks(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz), tz)));
       } catch (e) {
-        problems.push(`Couldn't read your Canvas feed: ${(e as Error).message}`);
+        problems.push(`Couldn't read your Canvas link: ${(e as Error).message}.`);
+      }
+    }
+    if (teamUrl) {
+      try {
+        const seen = new Set(events.map((e) => `${e.title}|${e.start.getTime()}`));
+        events.push(...(await feedEvents(teamUrl, from, to)).filter((e) => !seen.has(`${e.title}|${e.start.getTime()}`)));
+      } catch (e) {
+        problems.push(`Couldn't read your team schedule link: ${(e as Error).message}.`);
       }
     }
   }
@@ -96,8 +104,8 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
               Use my calendar
             </Link>
           ) : (
-            <form action={signOutAction}>
-              <button className={styles.btn}>Sign out</button>
+            <form action={session ? signOutAction : forgetMe}>
+              <button className={styles.btn}>{session ? "Sign out" : "Start over"}</button>
             </form>
           )}
         </nav>
@@ -203,6 +211,12 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 </label>
               </div>
               <input type="hidden" name="tz" value={tz} />
+              {!demo && (
+                <label>
+                  Team schedule link (Teamworks calendar sync)
+                  <input name="teamUrl" type="url" placeholder="https://…" defaultValue={teamUrl} />
+                </label>
+              )}
               {!demo && (
                 <label>
                   Canvas feed link (only if Canvas isn&apos;t already in your Google Calendar)

@@ -57,3 +57,41 @@
   font-size: 13px;
   color: var(--muted);
 }
+
+.links {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+}
+
+.links h2 {
+  font-size: 17px;
+}
+
+.links label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.links input {
+  font: inherit;
+  font-size: 15px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.links button {
+  justify-self: start;
+}
+
+.error {
+  color: #dc2626;
+  font-size: 13px;
+}
