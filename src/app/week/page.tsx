@@ -14,6 +14,7 @@ import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/li
 import type { CalEvent, Task } from "@/lib/types";
 import { Alerts, type ConflictView, type Note } from "./Alerts";
 import { MonthGrid } from "./MonthGrid";
+import { AutoCheck, AutoHours } from "./AutoSave";
 import { WeekGrid, type PlannedBlock } from "./WeekGrid";
 import styles from "./week.module.css";
 
@@ -284,7 +285,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     <li key={t.id} className={done.has(t.id) ? styles.isDone : ""}>
       <input type="hidden" name="id" value={t.id} />
       <label className={styles.check}>
-        <input type="checkbox" name={`d:${t.id}`} defaultChecked={done.has(t.id)} aria-label={`Done: ${t.title}`} />
+        <AutoCheck name={`d:${t.id}`} checked={done.has(t.id)} label={`Done: ${t.title}`} />
       </label>
       <div className={styles.workText}>
         {t.title}
@@ -299,7 +300,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
         )}
       </div>
       <label className={styles.hoursIn}>
-        <input type="number" name={`h:${t.id}`} min="0" max="100" step="0.5" defaultValue={t.hours} aria-label={`Hours for ${t.title}`} />
+        <AutoHours name={`h:${t.id}`} value={t.hours} label={`Hours for ${t.title}`} />
         <span>h</span>
       </label>
     </li>
@@ -487,7 +488,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
             <h2>
               Due this week <span className={styles.count}>{thisWeek.length}</span>
             </h2>
-            {thisWeek.length === 0 ? <p className={styles.hint}>Nothing due for the rest of this week.</p> : <ul className={styles.workList}>{thisWeek.map((t) => workRow(t, false))}</ul>}
+            {thisWeek.length === 0 ? <p className={styles.hint}>{finished.length ? "Everything due this week is done." : "Nothing due for the rest of this week."}</p> : <ul className={styles.workList}>{thisWeek.map((t) => workRow(t, false))}</ul>}
             {later.length > 0 && (
               <>
                 <h3 className={styles.subhead}>Coming up</h3>
@@ -495,13 +496,12 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
               </>
             )}
             {finished.length > 0 && (
-              <details>
-                <summary className={styles.subhead}>Done ({finished.length})</summary>
+              <details className={styles.completed}>
+                <summary className={styles.subhead}>✓ Completed ({finished.length})</summary>
                 <ul className={styles.workList}>{finished.map((t) => workRow(t, true))}</ul>
               </details>
             )}
-            <button className={styles.btn}>Save hours and checkmarks</button>
-            <p className={styles.hint}>Hours are your own guess at how long each takes. Canvas items start with a rough estimate.</p>
+            <p className={styles.hint}>Check off work and it moves to Completed. Hours are your own guess at how long each takes, and they save as you change them.</p>
           </form>
 
           <div className={styles.card}>

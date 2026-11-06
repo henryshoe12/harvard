@@ -1130,3 +1130,17 @@
 .suggestBtn:hover {
   background: #f1d6db;
 }
+
+.completed {
+  background: var(--background);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.completed summary {
+  color: #3d7a57;
+}
+
+.completed .workList {
+  margin-top: 6px;
+}
