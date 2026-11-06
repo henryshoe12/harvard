@@ -34,10 +34,15 @@ export type Settings = {
   bedtime: string; // "23:00"
   /** When the athlete's day starts: free time isn't counted before this. */
   wake: string; // "07:00"
+  /** For email drafts: "football", and the athlete's name to sign with. */
+  sport: string;
+  name: string;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   tz: "America/New_York",
   bedtime: "23:00",
   wake: "07:00",
+  sport: "",
+  name: "",
 };

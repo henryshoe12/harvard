@@ -115,3 +115,57 @@ describe("calendar feed links", () => {
     }
   });
 });
+
+describe("travel conflicts", () => {
+  it("merges travel legs and the game into one trip and finds what it runs into", async () => {
+    const { demoTasks } = await import("../demo");
+    const { findConflicts, findTrips, tripName } = await import("../conflicts");
+    const events = demoEvents(monday, tz);
+    const trips = findTrips(events);
+    expect(trips).toHaveLength(1);
+    expect(tripName(trips[0])).toBe("Penn");
+    expect(trips[0].away).toBe(true);
+    const [c] = findConflicts(events, demoTasks(monday, tz));
+    const byCourse = Object.fromEntries(c.courses.map((k) => [k.course, k]));
+    expect(byCourse["MATH 21A"].missed.map((m) => m.title)).toEqual(["MATH 21A lecture"]);
+    expect(byCourse["EC 10"].due.map((t) => t.title)).toEqual(["EC 10 problem set 5"]);
+    expect(byCourse["Expos"].due).toHaveLength(1); // due the day after getting home
+    expect(byCourse["MATH 21A"].due).toHaveLength(0); // Wednesday's problem set is before the trip
+  });
+
+  it("reads course codes however they're written", async () => {
+    const { courseOf, courseKey } = await import("../conflicts");
+    expect(courseOf("MATH 21A: Problem Set 8")).toBe("MATH 21A");
+    expect(courseOf("EC10 section")).toBe("EC 10");
+    expect(courseOf("Study for midterm")).toBeNull();
+    expect(courseKey("Math 21a")).toBe(courseKey("MATH 21A"));
+  });
+});
+
+describe("email drafts", () => {
+  it("writes a professor email naming what's missed and due", async () => {
+    const { draftEmail, greeting, composeLinks } = await import("../email");
+    const d = draftEmail({
+      course: "EC 10",
+      place: "Penn",
+      away: true,
+      tripStart: atLocal({ y: 2026, m: 11, d: 13 }, parseClock("10:00"), tz),
+      tripEnd: atLocal({ y: 2026, m: 11, d: 14 }, parseClock("22:00"), tz),
+      missed: [{ title: "EC 10 section", start: atLocal({ y: 2026, m: 11, d: 13 }, parseClock("09:00"), tz) }],
+      due: [{ title: "EC 10 problem set 5", due: atLocal({ y: 2026, m: 11, d: 13 }, parseClock("17:00"), tz) }],
+      tz,
+      athleteName: "Henry",
+      sport: "football",
+      toName: "Prof. Dana Whitfield",
+    });
+    expect(d.subject).toBe("EC 10: away for the Penn game (Friday, Nov 13)");
+    expect(d.body).toContain("Hi Professor Whitfield,");
+    expect(d.body).toContain("I'm on the football team and I'll be traveling for our game at Penn from Friday, Nov 13 to Saturday, Nov 14.");
+    expect(d.body).toContain("I'll miss section on Friday, Nov 13 at 9:00 AM.");
+    expect(d.body).toContain("Problem set 5 (due Friday at 5:00 PM) is due");
+    expect(d.body.trim().endsWith("Henry")).toBe(true);
+    expect(greeting("Sam Ortiz")).toBe("Hi Sam,");
+    expect(greeting("Dr. Priya Raman")).toBe("Hi Dr. Raman,");
+    expect(composeLinks("a@b.edu", "Hi there", "Line 1\nLine 2").mail).toBe("mailto:a%40b.edu?subject=Hi%20there&body=Line%201%0ALine%202");
+  });
+});

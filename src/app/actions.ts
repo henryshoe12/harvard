@@ -20,6 +20,8 @@ export async function saveSettings(form: FormData) {
     bedtime: String(form.get("bedtime") ?? ""),
     wake: String(form.get("wake") ?? ""),
     tz: String(form.get("tz") ?? "") || undefined,
+    ...(form.has("sport") ? { sport: String(form.get("sport")) } : {}),
+    ...(form.has("name") ? { name: String(form.get("name")) } : {}),
     canvasUrl: form.has("canvasUrl") ? String(form.get("canvasUrl")).trim() : undefined,
     teamUrl: form.has("teamUrl") ? String(form.get("teamUrl")).trim() : undefined,
   });

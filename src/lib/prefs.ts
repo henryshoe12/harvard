@@ -79,6 +79,8 @@ function pick(raw: Record<string, unknown>): Partial<Settings> {
   const out: Partial<Settings> = {};
   if (typeof raw.bedtime === "string" && CLOCK.test(raw.bedtime)) out.bedtime = raw.bedtime;
   if (typeof raw.wake === "string" && CLOCK.test(raw.wake)) out.wake = raw.wake;
+  if (typeof raw.sport === "string") out.sport = raw.sport.trim().slice(0, 40);
+  if (typeof raw.name === "string") out.name = raw.name.trim().slice(0, 60);
   if (typeof raw.tz === "string") {
     try {
       new Intl.DateTimeFormat("en-US", { timeZone: raw.tz });

@@ -11,6 +11,8 @@ Overtime shows, it doesn't schedule you. You decide when to do the work.
 - **Work due, with time.** Every assignment from Canvas (or added by hand) with an hour estimate you can change, and a checkbox when it's done. "Due this week" and "Coming up" are listed separately.
 - **Your fixed schedule.** Practice, lifts, film, travel and class from Google Calendar, Teamworks or Canvas links. Canvas lectures count as class time, not homework.
 - **Free time, on demand.** Flip "Show free time" to see the open gaps (30 minutes or longer, between when your day starts and ends), and compare hours of free time left with hours of work due.
+- **Travel conflicts.** Every class and deadline that lands on a road trip or game, grouped by course, with an email to the professor or TF already written. It opens in Gmail, Outlook or your mail app so you check it and press send.
+- **A page for each class.** Upload a syllabus (PDF or pasted text) and Claude turns it into the rules, grading, staff emails, every due date, and what the class means for an athlete who travels. Add any date to your week in one tap.
 - **No Google needed.** Schools like Harvard block new apps from student Google accounts, so you can paste your Teamworks calendar-sync link and Canvas feed link instead.
 
 ## Run it locally
@@ -32,9 +34,13 @@ npm test                      # unit tests
    - `https://<your-vercel-domain>/api/auth/callback/google` (once deployed)
 5. Copy the client ID and secret into `.env.local` as `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`. Generate `AUTH_SECRET` with `npx auth secret`.
 
+## Syllabus reading
+
+Create an API key at [console.anthropic.com](https://console.anthropic.com/) and set it as `ANTHROPIC_API_KEY` (in `.env.local`, and in Vercel's environment variables). Each syllabus costs a few cents to read. Without a key, everything else works and the demo classes still show.
+
 ## Deploy (free)
 
-Import the repo on [Vercel](https://vercel.com/new), add the three environment variables from `.env.example`, and add the Vercel URL's callback to the Google OAuth client.
+Import the repo on [Vercel](https://vercel.com/new), add the environment variables from `.env.example`, and add the Vercel URL's callback to the Google OAuth client.
 
 ## What's next
 

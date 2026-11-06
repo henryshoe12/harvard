@@ -577,3 +577,177 @@
   padding: 6px 8px;
   text-align: right;
 }
+
+/* Travel conflicts: a soft lavender card (the travel colour) above the week. */
+.conflicts {
+  display: grid;
+  gap: 12px;
+}
+
+.conflictCard {
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  display: grid;
+  gap: 10px;
+  border-left: 4px solid #b9a8e6;
+}
+
+.conflictHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px 16px;
+}
+
+.conflictHead h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.conflictHead span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.conflictList {
+  list-style: none;
+  display: grid;
+}
+
+.conflictRow {
+  border-top: 1px solid var(--grid);
+  padding: 12px 0 4px;
+  display: grid;
+  gap: 12px;
+}
+
+.conflictRow:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+
+.conflictMain {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.conflictMain strong {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.conflictItems {
+  list-style: none;
+  margin-top: 4px;
+  display: grid;
+  gap: 2px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.conflictItems li::before {
+  content: "· ";
+  color: #8f7cc9;
+}
+
+.conflictMain button {
+  flex-shrink: 0;
+}
+
+.syllabusNote {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #f4f0fb;
+  color: #4a3b7a;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.syllabusNote span {
+  font-weight: 600;
+}
+
+.hint a {
+  color: var(--accent);
+}
+
+.emailBox {
+  display: grid;
+  gap: 10px;
+  background: var(--background);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.emailBox label {
+  display: grid;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.emailBox input,
+.emailBox textarea {
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--foreground);
+  width: 100%;
+}
+
+.emailBox textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.emailBox input:focus,
+.emailBox textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.sendRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip,
+.chipOn {
+  font: inherit;
+  font-size: 12.5px;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.chipOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+@media (max-width: 600px) {
+  .conflictMain {
+    flex-direction: column;
+  }
+}

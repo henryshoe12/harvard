@@ -4,12 +4,14 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { addTask, forgetMe, removeTask, saveSettings, saveWork, signOutAction } from "@/app/actions";
 import { canvasFeed, feedEvents } from "@/lib/canvas";
+import { findConflicts, tripName } from "@/lib/conflicts";
 import { demoEvents, demoTasks } from "@/lib/demo";
 import { listCalendar } from "@/lib/google";
 import { freeTime, hoursIn } from "@/lib/freetime";
 import { readPrefs } from "@/lib/prefs";
 import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/lib/time";
 import type { CalEvent, Task } from "@/lib/types";
+import { TravelConflicts, type ConflictView } from "./TravelConflicts";
 import { WeekGrid } from "./WeekGrid";
 import styles from "./week.module.css";
 
@@ -94,6 +96,21 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
   const freeLeft = hoursIn(free, now > from ? now : undefined);
   const workHours = thisWeek.reduce((n, t) => n + t.hours, 0);
   const fixedHours = hoursIn(events.filter((e) => !e.allDay && e.end > from && e.start < to));
+  // Trips and games that land on class time or deadlines.
+  const conflicts: ConflictView[] = findConflicts(events, open).map((c) => ({
+    id: c.trip.id,
+    place: tripName(c.trip),
+    away: c.trip.away,
+    start: c.trip.start.toISOString(),
+    end: c.trip.end.toISOString(),
+    courses: c.courses.map((k) => ({
+      course: k.course,
+      missed: k.missed.map((m) => ({ title: m.title, start: m.start.toISOString() })),
+      due: k.due.map((t) => ({ title: t.title, due: t.due.toISOString() })),
+    })),
+  }));
+  const athleteName = settings.name || (demo ? "" : (session?.user?.name ?? ""));
+  const sport = settings.sport || (demo ? "football" : "");
   const round = (h: number) => (Math.round(h * 2) / 2).toString();
   const tight = workHours > freeLeft;
 
@@ -151,6 +168,9 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
               ›
             </Link>
           </div>
+          <Link className={styles.btn} href={demo ? "/classes?demo=1" : "/classes"}>
+            Classes
+          </Link>
           {demo ? (
             <Link className={styles.btnPrimary} href="/">
               Use my calendar
@@ -169,6 +189,8 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
           {p}
         </div>
       ))}
+
+      {conflicts.length > 0 && <TravelConflicts conflicts={conflicts} tz={tz} athleteName={athleteName} sport={sport} demo={demo} />}
 
       <div className={styles.stats}>
         <div className={styles.stat}>
@@ -297,6 +319,16 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 <label>
                   My day ends
                   <input name="bedtime" type="time" defaultValue={settings.bedtime} />
+                </label>
+              </div>
+              <div className={styles.row}>
+                <label>
+                  Your name (for emails)
+                  <input name="name" defaultValue={settings.name} placeholder={session?.user?.name ?? "First Last"} />
+                </label>
+                <label>
+                  Your sport
+                  <input name="sport" defaultValue={settings.sport} placeholder="football" />
                 </label>
               </div>
               <input type="hidden" name="tz" value={tz} />
