@@ -2,15 +2,20 @@ import { connection } from "next/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { addTask, removeTask, saveSettings, signOutAction } from "@/app/actions";
-import { canvasTasks } from "@/lib/canvas";
+import { acceptSuggestions, addTask, forgetMe, removeTask, saveSettings, saveWork, signOutAction } from "@/app/actions";
+import { canvasFeed, feedEvents } from "@/lib/canvas";
+import { findConflicts, tripName } from "@/lib/conflicts";
 import { demoEvents, demoTasks } from "@/lib/demo";
 import { listCalendar } from "@/lib/google";
-import { planWeek } from "@/lib/planner";
+import { freeTime, hoursIn } from "@/lib/freetime";
 import { readPrefs } from "@/lib/prefs";
+import { suggestPlan } from "@/lib/suggest";
 import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/lib/time";
 import type { CalEvent, Task } from "@/lib/types";
-import { WeekGrid } from "./WeekGrid";
+import { Alerts, type ConflictView, type Note } from "./Alerts";
+import { MonthGrid } from "./MonthGrid";
+import { AutoCheck, AutoHours } from "./AutoSave";
+import { WeekGrid, type PlannedBlock } from "./WeekGrid";
 import styles from "./week.module.css";
 
 export const metadata = { title: "Your week · Overtime" };
@@ -18,34 +23,71 @@ export const metadata = { title: "Your week · Overtime" };
 // Every view reads the session and the athlete's own calendar, so render on request.
 export const instant = false;
 
-export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; demo?: string }> }) {
-  await connection();
-  const { w, demo: demoParam } = await searchParams;
-  const demo = demoParam === "1";
-  const session = demo ? null : await auth();
-  if (!demo && !session) redirect("/");
+type View = "day" | "week" | "month";
 
-  const { settings, canvasUrl, tasks: manualTasks } = await readPrefs();
+export default async function WeekPage({ searchParams }: { searchParams: Promise<{ w?: string; d?: string; view?: string; demo?: string; free?: string; plan?: string; len?: string; suggest?: string; skip?: string }> }) {
+  await connection();
+  const sp = await searchParams;
+  const { w, d: dParam, view: viewParam, demo: demoParam, free: freeParam, len: lenParam } = sp;
+  // "Suggest a plan" shows a proposal on the grid; "not here" skips are start-end minute pairs.
+  const suggesting = sp.suggest === "1";
+  const planParam = suggesting ? undefined : sp.plan;
+  const skips = suggesting
+    ? (sp.skip ?? "")
+        .split(",")
+        .map((x) => x.split("-").map(Number))
+        .filter((x) => x.length === 2 && x.every(Number.isFinite) && x[1] > x[0])
+        .slice(0, 40)
+    : [];
+  // Planning happens on the day or week grid.
+  const view: View = viewParam === "day" ? "day" : viewParam === "month" && !planParam && !suggesting ? "month" : "week";
+  const showFree = freeParam === "1" || !!planParam;
+  const demo = demoParam === "1";
+  const session = demo ? null : await auth().catch(() => null);
+  const { settings, canvasUrl, teamUrl, tasks: manualTasks, work, plan } = await readPrefs();
+  // Signed in with Google, or set up with calendar links only (schools that block Google apps).
+  if (!demo && !session && !teamUrl && !canvasUrl) redirect("/");
   const tz = settings.tz;
-  const monday = weekStart(w && /^\d{4}-\d{2}-\d{2}$/.test(w) ? parseDayKey(w) : localDay(new Date(), tz));
+  const isKey = (k?: string) => !!k && /^\d{4}-\d{2}-\d{2}$/.test(k);
+  // The day the athlete is looking at; day, week and month views are all built around it.
+  const anchor = isKey(dParam) ? parseDayKey(dParam!) : isKey(w) ? parseDayKey(w!) : localDay(new Date(), tz);
+  const monday = weekStart(anchor);
   const from = atLocal(monday, 0, tz);
-  const to = atLocal(addDays(monday, 7), 12 * 60, tz); // a little past Sunday so Monday's 6am event shapes Sunday night
+  const to = atLocal(addDays(monday, 7), 0, tz);
+  // What the calendar shows: one day, the week, or the whole month (as full weeks).
+  const firstOfMonth = { y: anchor.y, m: anchor.m, d: 1 };
+  const lastOfMonth = addDays({ y: anchor.m === 12 ? anchor.y + 1 : anchor.y, m: (anchor.m % 12) + 1, d: 1 }, -1);
+  const viewStart = view === "day" ? anchor : view === "month" ? weekStart(firstOfMonth) : monday;
+  const daysBetween = (a: typeof anchor, b: typeof anchor) => Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 86400000);
+  const viewDays = view === "day" ? 1 : view === "month" ? daysBetween(viewStart, weekStart(lastOfMonth)) + 7 : 7;
+  const viewFrom = atLocal(viewStart, 0, tz);
+  const viewTo = atLocal(addDays(viewStart, viewDays), 0, tz);
+  // Load enough for both the view and this week's work list.
+  const loadFrom = viewFrom < from ? viewFrom : from;
+  // Suggestions look two weeks ahead, so next week's deadlines can start this week.
+  const horizonTo = new Date(to.getTime() + 7 * 86400000);
+  const loadTo = suggesting && horizonTo > viewTo ? horizonTo : viewTo > to ? viewTo : to;
+  const loadDeadlinesTo = new Date(loadTo.getTime() + 21 * 86400000);
 
   let events: CalEvent[] = [];
   let tasks: Task[] = [...manualTasks];
   const problems: string[] = [];
 
   if (demo) {
-    events = demoEvents(monday, tz);
+    // The sample week's schedule, repeated for every week on screen; its homework once.
+    for (let wk = weekStart(localDay(loadFrom, tz)); atLocal(wk, 0, tz) < loadTo; wk = addDays(wk, 7)) {
+      const tag = dayKey(wk);
+      events.push(...demoEvents(wk, tz).map((e) => ({ ...e, id: `${e.id}-${tag}` })));
+    }
     tasks.push(...demoTasks(monday, tz));
   } else {
-    if (!session?.accessToken || session.error) {
+    if (session && (!session.accessToken || session.error)) {
       problems.push("Your Google sign-in expired. Sign out and back in.");
-    } else {
+    } else if (session?.accessToken) {
       try {
-        // Canvas deadlines are looked up three weeks ahead so a midterm next week shapes this week.
-        const cal = await listCalendar(session.accessToken, from, atLocal(addDays(monday, 21), 0, tz), tz);
-        events = cal.events.filter((e) => e.start < to);
+        // Deadlines are looked up three weeks ahead so next week's midterm shows as coming up.
+        const cal = await listCalendar(session.accessToken, loadFrom, loadDeadlinesTo, tz);
+        events = cal.events.filter((e) => e.start < loadTo);
         tasks.push(...cal.tasks);
       } catch (e) {
         problems.push(`Couldn't read Google Calendar (${(e as Error).message}).`);
@@ -53,122 +95,420 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     }
     if (canvasUrl) {
       try {
-        tasks.push(...(await canvasTasks(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz))));
+        const canvas = await canvasFeed(canvasUrl, loadFrom, loadDeadlinesTo, tz);
+        tasks.push(...canvas.tasks);
+        events.push(...canvas.events.filter((e) => e.start < loadTo));
       } catch (e) {
-        problems.push(`Couldn't read your Canvas feed: ${(e as Error).message}`);
+        problems.push(`Couldn't read your Canvas link: ${(e as Error).message}.`);
+      }
+    }
+    if (teamUrl) {
+      try {
+        const seen = new Set(events.map((e) => `${e.title}|${e.start.getTime()}`));
+        events.push(...(await feedEvents(teamUrl, loadFrom, loadTo)).filter((e) => !seen.has(`${e.title}|${e.start.getTime()}`)));
+      } catch (e) {
+        problems.push(`Couldn't read your team schedule link: ${(e as Error).message}.`);
       }
     }
   }
-  // Same deadline from Google Calendar and the Canvas link: keep one.
+  // Same deadline from Google Calendar and the Canvas link: keep one. Past-due work drops off.
+  const now = demo ? from : new Date();
+  const cutoff = now > from ? now : from;
   const seenTasks = new Set<string>();
-  tasks = tasks.filter((t) => {
-    const k = `${t.title.toLowerCase()}|${t.due.getTime()}`;
-    if (t.due <= from || seenTasks.has(k)) return false;
-    seenTasks.add(k);
-    return true;
-  });
+  tasks = tasks
+    .filter((t) => {
+      const k = `${t.title.toLowerCase()}|${t.due.getTime()}`;
+      if (t.due <= cutoff || seenTasks.has(k)) return false;
+      seenTasks.add(k);
+      return true;
+    })
+    .map((t) => ({ ...t, hours: work.est[t.id] ?? t.hours }))
+    .sort((a, b) => a.due.getTime() - b.due.getTime());
+  const done = new Set(work.done);
+  const open = tasks.filter((t) => !done.has(t.id));
+  const thisWeek = open.filter((t) => t.due < to);
+  const later = open.filter((t) => t.due >= to);
+  const finished = tasks.filter((t) => done.has(t.id));
 
-  const plan = planWeek({ start: monday, events, tasks, settings, now: demo ? from : new Date() });
-  const hours = (kind: "study" | "sleep") =>
-    plan.blocks.filter((b) => b.kind === kind).reduce((n, b) => n + (b.end.getTime() - b.start.getTime()) / 3600000, 0);
-  const sleepNights = plan.blocks.filter((b) => b.kind === "sleep").length;
-  const fmtDue = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const q = (week: string) => `/week?w=${week}${demo ? "&demo=1" : ""}`;
+  // Work sessions the athlete placed in their free time.
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const plannedMins = new Map<string, number>();
+  for (const p of plan) plannedMins.set(p.taskId, (plannedMins.get(p.taskId) ?? 0) + p.mins);
+  const planned: PlannedBlock[] = plan.map((p) => ({
+    taskId: p.taskId,
+    title: byId.get(p.taskId)?.title ?? "Planned work",
+    start: p.start,
+    end: new Date(p.start.getTime() + p.mins * 60000),
+  }));
+  const plannedHours = (t: Task) => (plannedMins.get(t.id) ?? 0) / 60;
+  // Planned sessions take up time, so free time is what's left around them.
+  const busy = (list: CalEvent[]) => [
+    ...list,
+    ...planned.map((p) => ({ id: `plan-${p.taskId}-${p.start.getTime()}`, title: p.title, start: p.start, end: p.end, kind: "other" as const })),
+  ];
+
+  // Free time between fixed commitments, inside the hours the athlete says their day runs.
+  const weekEvents = events.filter((e) => e.end > from && e.start < to);
+  const free = freeTime({ start: monday, events: busy(weekEvents), tz, dayStart: settings.wake, dayEnd: settings.bedtime });
+  const freeLeft = hoursIn(free, now > from ? now : undefined);
+  // Work still to find time for: what's due, minus what's already planned.
+  const workHours = thisWeek.reduce((n, t) => n + Math.max(0, t.hours - plannedHours(t)), 0);
+  const plannedThisWeek = thisWeek.reduce((n, t) => n + Math.min(t.hours, plannedHours(t)), 0);
+  const fixedHours = hoursIn(weekEvents.filter((e) => !e.allDay));
+  const viewEvents = events.filter((e) => e.end > viewFrom && e.start < viewTo);
+  const viewPlanned = planned.filter((p) => p.end > viewFrom && p.start < viewTo);
+  // Suggest a plan: spread what's left of each assignment over free time before it's due.
+  let suggestions: PlannedBlock[] = [];
+  const unfit: { title: string; mins: number }[] = [];
+  if (suggesting) {
+    const start = now > from ? now : from;
+    const skipEvents: CalEvent[] = skips.map(([a, b], i) => ({ id: `skip-${i}`, title: "skip", start: new Date(a * 60000), end: new Date(b * 60000), kind: "other" }));
+    const horizonFree = freeTime({
+      start: monday,
+      days: 14,
+      events: busy([...events.filter((e) => e.start < horizonTo), ...skipEvents]),
+      tz,
+      dayStart: settings.wake,
+      dayEnd: settings.bedtime,
+    });
+    const plannedByDay = new Map<string, number>();
+    for (const p of planned) {
+      const k = dayKey(localDay(p.start, tz));
+      plannedByDay.set(k, (plannedByDay.get(k) ?? 0) + (p.end.getTime() - p.start.getTime()) / 60000);
+    }
+    const want = open
+      .filter((t) => t.due < horizonTo)
+      .map((t) => ({ id: t.id, due: t.due, minsLeft: Math.round(t.hours * 60 - (plannedMins.get(t.id) ?? 0)) }))
+      .filter((t) => t.minsLeft > 0);
+    const proposal = suggestPlan({ tasks: want, free: horizonFree, events: events.filter((e) => e.start < horizonTo), tz, now: start, plannedByDay });
+    suggestions = proposal.map((p) => ({ taskId: p.taskId, title: byId.get(p.taskId)?.title ?? "Work", start: p.start, end: new Date(p.start.getTime() + p.mins * 60000) }));
+    for (const t of want) {
+      const got = proposal.filter((p) => p.taskId === t.id).reduce((n, p) => n + p.mins, 0);
+      if (t.minsLeft - got >= 15) unfit.push({ title: byId.get(t.id)!.title, mins: t.minsLeft - got });
+    }
+  }
+  const suggestedHours = suggestions.reduce((n, p) => n + (p.end.getTime() - p.start.getTime()) / 3600000, 0);
+  const suggestedTasks = new Set(suggestions.map((p) => p.taskId)).size;
+  const viewSuggested = suggestions.filter((p) => p.end > viewFrom && p.start < viewTo);
+  const viewFree = showFree
+    ? freeTime({
+        start: viewStart,
+        days: viewDays,
+        events: busy([...viewEvents, ...suggestions.map((p, i) => ({ id: `sg-${i}`, title: p.title, start: p.start, end: p.end, kind: "other" as const }))]),
+        tz,
+        dayStart: settings.wake,
+        dayEnd: settings.bedtime,
+      }).filter((f) => demo || f.end > now)
+    : [];
+
+  // Planning mode: the task being placed and how long each session is.
+  const planTask = planParam ? byId.get(planParam) : undefined;
+  const planLeft = planTask ? Math.max(0, Math.round(planTask.hours * 60 - (plannedMins.get(planTask.id) ?? 0))) : 0;
+  const lenOptions = [30, 60, 90, 120].filter((m) => m < planLeft);
+  const planLen = planTask ? Math.min(planLeft, Number(lenParam) > 0 ? Number(lenParam) : planLeft <= 120 ? planLeft : 90) : 0;
+  const viewDue = open.filter((t) => t.due >= viewFrom && t.due < viewTo);
+
+  // Trips and games this week that land on class time or deadlines.
+  const conflicts: ConflictView[] = findConflicts(weekEvents, open)
+    .filter((c) => c.trip.end > now)
+    .map((c) => ({
+      id: c.trip.id,
+      place: tripName(c.trip),
+      away: c.trip.away,
+      start: c.trip.start.toISOString(),
+      end: c.trip.end.toISOString(),
+      courses: c.courses.map((k) => ({
+        course: k.course,
+        missed: k.missed.map((m) => ({ title: m.title, start: m.start.toISOString() })),
+        due: k.due.map((t) => ({ title: t.title, due: t.due.toISOString() })),
+      })),
+    }));
+  const athleteName = settings.name || (demo ? "" : (session?.user?.name ?? ""));
+  const sport = settings.sport || (demo ? "football" : "");
+  const round = (h: number) => (Math.round(h * 2) / 2).toString();
+  const tight = workHours > freeLeft;
+  const notes: Note[] = [
+    ...(tight
+      ? [
+          {
+            id: "tight",
+            tone: "warn" as const,
+            text: `${round(workHours)}h of work is due this week, and you have ${round(freeLeft)}h of free time left.`,
+            detail: "Free time counts the open gaps of 30 minutes or more between when your day starts and ends (Settings). Turn on Show free time to see them.",
+          },
+        ]
+      : []),
+    ...problems.map((p, i) => ({ id: `p${i}`, tone: "warn" as const, text: p.split(/[(:]/)[0].trim().replace(/\.$/, "") + ".", detail: p })),
+  ];
+
+  const fmtDue = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "numeric", minute: "2-digit" });
+  const fmtDate = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
+  const utc = (d: typeof monday) => new Date(Date.UTC(d.y, d.m - 1, d.d));
+  const fmtRange = (d: typeof monday) => utc(d).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const sunday = addDays(monday, 6);
+  const title =
+    view === "day"
+      ? utc(anchor).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })
+      : view === "month"
+        ? utc(anchor).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
+        : `${fmtRange(monday)} – ${sunday.m === monday.m ? sunday.d : fmtRange(sunday)}`;
+  const today = dayKey(localDay(new Date(), tz));
+  const link = (opts: { d?: string; view?: View; free?: boolean; plan?: string | null; len?: number; suggest?: boolean; skip?: string }) => {
+    const p = new URLSearchParams();
+    const v = opts.view ?? view;
+    if (v !== "week") p.set("view", v);
+    if (opts.d) p.set("d", opts.d);
+    if (demo) p.set("demo", "1");
+    const suggest = opts.suggest ?? (suggesting && opts.plan === undefined);
+    if (suggest) {
+      p.set("suggest", "1");
+      const sk = opts.skip ?? (opts.suggest === undefined ? (sp.skip ?? "") : "");
+      if (sk) p.set("skip", sk);
+      if (freeParam === "1") p.set("free", "1");
+      return `/week?${p.toString()}`;
+    }
+    const planning = opts.plan === undefined ? planParam : opts.plan;
+    if (planning) {
+      p.set("plan", planning);
+      const l = opts.len ?? (opts.plan === undefined ? Number(lenParam) || 0 : 0);
+      if (l) p.set("len", String(l));
+    } else if (opts.free ?? freeParam === "1") p.set("free", "1");
+    const qs = p.toString();
+    return `/week${qs ? `?${qs}` : ""}`;
+  };
+  const step = (n: number) =>
+    dayKey(view === "day" ? addDays(anchor, n) : view === "week" ? addDays(monday, 7 * n) : { y: anchor.m + n > 12 ? anchor.y + 1 : anchor.m + n < 1 ? anchor.y - 1 : anchor.y, m: ((anchor.m + n + 11) % 12) + 1, d: 1 });
+  const here = dayKey(anchor);
+  const unit = view === "day" ? "day" : view === "week" ? "week" : "month";
+
+  const workRow = (t: Task, showDate: boolean) => (
+    <li key={t.id} className={done.has(t.id) ? styles.isDone : ""}>
+      <input type="hidden" name="id" value={t.id} />
+      <label className={styles.check}>
+        <AutoCheck name={`d:${t.id}`} checked={done.has(t.id)} label={`Done: ${t.title}`} />
+      </label>
+      <div className={styles.workText}>
+        {t.title}
+        <small>
+          Due {showDate ? fmtDate.format(t.due) : fmtDue.format(t.due)}
+          {t.source === "canvas" ? " · Canvas" : ""}
+        </small>
+        {!done.has(t.id) && (
+          <Link className={`${styles.planBtn} ${planTask?.id === t.id ? styles.planBtnOn : ""}`} href={link({ plan: t.id, view: view === "day" ? "day" : "week", d: here })}>
+            {plannedHours(t) >= t.hours && t.hours > 0 ? "✓ All planned" : plannedHours(t) > 0 ? `${round(plannedHours(t))} of ${round(t.hours)}h planned` : "Plan time"}
+          </Link>
+        )}
+      </div>
+      <label className={styles.hoursIn}>
+        <AutoHours name={`h:${t.id}`} value={t.hours} label={`Hours for ${t.title}`} />
+        <span>h</span>
+      </label>
+    </li>
+  );
 
   return (
     <main className={styles.page}>
       <header className={styles.top}>
-        <h1>
-          Week of {monday.m}/{monday.d}
-        </h1>
+        <div>
+          <p className={styles.brand}>
+            Overtime{demo && <span className={styles.demoTag}>Demo</span>}
+          </p>
+          <h1>{title}</h1>
+          <p className={styles.summary}>
+            <b>{round(workHours)}h</b> of work {plannedThisWeek > 0 ? `still to plan (${round(plannedThisWeek)}h planned)` : "due this week"} · <b className={tight ? styles.tightText : ""}>{round(freeLeft)}h</b> free
+            {now > from && now < to ? " left" : ""} · <b>{round(fixedHours)}h</b> on your schedule
+          </p>
+        </div>
         <nav className={styles.nav}>
-          <Link className={styles.btn} href={q(dayKey(addDays(monday, -7)))}>
-            ← Prev
-          </Link>
-          <Link className={styles.btn} href={demo ? "/week?demo=1" : "/week"}>
-            This week
-          </Link>
-          <Link className={styles.btn} href={q(dayKey(addDays(monday, 7)))}>
-            Next →
+          <div className={styles.segment}>
+            <Link className={styles.segBtn} href={link({ d: step(-1) })} aria-label={`Previous ${unit}`}>
+              ‹
+            </Link>
+            <Link className={styles.segBtn} href={link({})}>
+              Today
+            </Link>
+            <Link className={styles.segBtn} href={link({ d: step(1) })} aria-label={`Next ${unit}`}>
+              ›
+            </Link>
+          </div>
+          <div className={styles.segment} role="group" aria-label="View">
+            {(["day", "week", "month"] as const).map((v) => (
+              <Link key={v} className={`${styles.segBtn} ${v === view ? styles.segOn : ""}`} href={link({ view: v, d: here })} aria-current={v === view}>
+                {v[0].toUpperCase() + v.slice(1)}
+              </Link>
+            ))}
+          </div>
+          <Link className={styles.btn} href={demo ? "/classes?demo=1" : "/classes"}>
+            Classes
           </Link>
           {demo ? (
             <Link className={styles.btnPrimary} href="/">
               Use my calendar
             </Link>
           ) : (
-            <form action={signOutAction}>
-              <button className={styles.btn}>Sign out</button>
+            <form action={session ? signOutAction : forgetMe}>
+              <button className={styles.btnGhost}>{session ? "Sign out" : "Start over"}</button>
             </form>
           )}
         </nav>
       </header>
 
-      {demo && <div className={styles.banner}>Demo week: a sample in-season football schedule. Sign in to plan your own.</div>}
-      {problems.map((p) => (
-        <div key={p} className={styles.warn}>
-          {p}
-        </div>
-      ))}
-      {plan.sleepConflicts.map((c, i) => (
-        <div key={`s${i}`} className={styles.warn}>
-          {c.event} runs into your sleep on the night of {c.day}. Consider asking about it or going to bed right after.
-        </div>
-      ))}
-      {plan.shortfalls.map((s) => (
-        <div key={s.taskId} className={styles.warn}>
-          Not enough free time for {s.title}: about {Math.ceil(s.missingMins / 30) / 2} more hours needed before it&apos;s due.
-        </div>
-      ))}
+      <Alerts conflicts={conflicts} notes={notes} tz={tz} athleteName={athleteName} sport={sport} demo={demo} />
 
       <div className={styles.layout}>
-        <section style={{ display: "grid", gap: 12 }}>
-          <div className={styles.stats}>
-            <div className={styles.stat}>
-              <b>{(hours("sleep") / sleepNights).toFixed(1)}h</b>
-              <span>sleep protected per night</span>
+        <section className={styles.main}>
+          {suggesting && (
+            <div className={styles.planBar}>
+              <div>
+                <b>
+                  {suggestions.length
+                    ? `Suggested: ${suggestions.length} session${suggestions.length === 1 ? "" : "s"}, ${round(suggestedHours)}h for ${suggestedTasks} assignment${suggestedTasks === 1 ? "" : "s"}`
+                    : "Nothing to suggest: your work is planned or there's no free time before it's due"}
+                </b>
+                <span>
+                  The faded blocks are a suggestion. Tap × on any you don&apos;t want there and it finds another time. Game and travel days stay clear.
+                  {unfit.length > 0 && ` Didn't fit before the deadline: ${unfit.map((u) => `${round(u.mins / 60)}h of ${u.title}`).join(", ")}.`}
+                </span>
+              </div>
+              {suggestions.length > 0 && (
+                <form action={acceptSuggestions}>
+                  <input type="hidden" name="sessions" value={JSON.stringify(suggestions.map((p) => [p.taskId, p.start.toISOString(), (p.end.getTime() - p.start.getTime()) / 60000]))} />
+                  <input type="hidden" name="back" value={link({ d: here, suggest: false })} />
+                  <button className={styles.btnPrimary}>Accept plan</button>
+                </form>
+              )}
+              <Link className={styles.btn} href={link({ d: here, suggest: false })}>
+                Cancel
+              </Link>
             </div>
-            <div className={styles.stat}>
-              <b>{hours("study").toFixed(1)}h</b>
-              <span>study time planned</span>
+          )}
+          {planTask && (
+            <div className={styles.planBar}>
+              <div>
+                <b>Planning: {planTask.title}</b>
+                <span>
+                  {round(planTask.hours)}h total · {round(plannedHours(planTask))}h planned ·{" "}
+                  {planLeft > 0 ? `${round(planLeft / 60)}h left. Tap any free time to put a session there.` : "all planned."}
+                </span>
+              </div>
+              {planLeft > 0 && (
+                <div className={styles.lenRow}>
+                  <span>Session</span>
+                  {[...lenOptions, planLeft].map((m) => (
+                    <Link key={m} className={m === planLen ? styles.chipOn : styles.chip} href={link({ len: m, d: here })}>
+                      {m === planLeft ? `All ${round(m / 60)}h` : `${round(m / 60)}h`}
+                    </Link>
+                  ))}
+                  {planLen > 0 && planLen < planLeft && <span className={styles.lenNote}>= {Math.ceil(planLeft / planLen)} sessions</span>}
+                </div>
+              )}
+              <Link className={styles.btnPrimary} href={link({ plan: null, d: here })}>
+                Done
+              </Link>
             </div>
-            <div className={styles.stat}>
-              <b>{events.filter((e) => ["practice", "lift", "game", "film", "treatment", "travel"].includes(e.kind)).length}</b>
-              <span>team events worked around</span>
+          )}
+          <div className={styles.gridBar}>
+            <div className={styles.legend}>
+              <span>
+                <i className={styles.dotTeam} />
+                Team
+              </span>
+              <span>
+                <i className={styles.dotClass} />
+                Class
+              </span>
+              <span>
+                <i className={styles.dotTravel} />
+                Travel
+              </span>
+              <span>
+                <i className={styles.dotDue} />
+                Due
+              </span>
+              {showFree && (
+                <span>
+                  <i className={styles.dotFree} />
+                  Free
+                </span>
+              )}
+              {planned.length > 0 && (
+                <span>
+                  <i className={styles.dotPlanned} />
+                  Planned work
+                </span>
+              )}
+            </div>
+            <div className={styles.barRight}>
+              {view !== "month" && !suggesting && !planTask && (
+                <Link className={styles.suggestBtn} href={link({ d: here, suggest: true })}>
+                  ✨ Suggest a plan
+                </Link>
+              )}
+              <Link className={`${styles.toggle} ${showFree ? styles.toggleOn : ""}`} href={link({ d: here, free: !showFree, plan: null, suggest: false })} aria-pressed={showFree}>
+                <span className={styles.knob} />
+                Show free time
+              </Link>
             </div>
           </div>
-          <div className={styles.gridWrap}>
-            <WeekGrid monday={monday} tz={tz} events={events} blocks={plan.blocks} />
-          </div>
+          {view === "month" ? (
+            <MonthGrid
+              start={viewStart}
+              weeks={viewDays / 7}
+              month={anchor.m}
+              tz={tz}
+              events={viewEvents}
+              due={viewDue}
+              free={showFree ? viewFree : null}
+              today={today}
+              dayHref={(k) => link({ view: "day", d: k })}
+            />
+          ) : (
+            <div className={styles.gridWrap}>
+              <WeekGrid
+                start={viewStart}
+                days={viewDays}
+                tz={tz}
+                events={viewEvents}
+                free={viewFree}
+                due={viewDue}
+                planned={viewPlanned}
+                suggested={viewSuggested.map((p) => {
+                  const k = `${Math.round(p.start.getTime() / 60000)}-${Math.round(p.end.getTime() / 60000)}`;
+                  return { ...p, skipHref: link({ d: here, skip: [sp.skip, k].filter(Boolean).join(",") }) };
+                })}
+                placing={planTask && planLeft > 0 ? { taskId: planTask.id, mins: planLen } : undefined}
+                today={today}
+              />
+            </div>
+          )}
         </section>
 
         <aside className={styles.side}>
+          <form action={saveWork} className={styles.card}>
+            <h2>
+              Due this week <span className={styles.count}>{thisWeek.length}</span>
+            </h2>
+            {thisWeek.length === 0 ? <p className={styles.hint}>{finished.length ? "Everything due this week is done." : "Nothing due for the rest of this week."}</p> : <ul className={styles.workList}>{thisWeek.map((t) => workRow(t, false))}</ul>}
+            {later.length > 0 && (
+              <>
+                <h3 className={styles.subhead}>Coming up</h3>
+                <ul className={styles.workList}>{later.slice(0, 8).map((t) => workRow(t, true))}</ul>
+              </>
+            )}
+            {finished.length > 0 && (
+              <details className={styles.completed}>
+                <summary className={styles.subhead}>✓ Completed ({finished.length})</summary>
+                <ul className={styles.workList}>{finished.map((t) => workRow(t, true))}</ul>
+              </details>
+            )}
+            <p className={styles.hint}>Check off work and it moves to Completed. Hours are your own guess at how long each takes, and they save as you change them.</p>
+          </form>
+
           <div className={styles.card}>
-            <h2>Coursework ({tasks.length})</h2>
-            <ul className={styles.taskList}>
-              {[...tasks]
-                .sort((a, b) => a.due.getTime() - b.due.getTime())
-                .map((t) => (
-                  <li key={t.id}>
-                    <div>
-                      {t.title}
-                      <small>
-                        due {fmtDue.format(t.due)} · {t.hours}h{t.source === "canvas" ? " · Canvas" : ""}
-                      </small>
-                    </div>
-                    {t.source === "manual" && (
-                      <form action={removeTask}>
-                        <input type="hidden" name="id" value={t.id} />
-                        <button className={styles.x} aria-label={`Remove ${t.title}`}>
-                          ×
-                        </button>
-                      </form>
-                    )}
-                  </li>
-                ))}
-            </ul>
-            <form action={addTask} style={{ display: "grid", gap: 8 }}>
+            <h2>Add work</h2>
+            <form action={addTask} className={styles.stack}>
               <label>
-                Add something to study for
+                What is it?
                 <input name="title" placeholder="e.g. Math 21A midterm" required />
               </label>
               <div className={styles.row}>
@@ -182,39 +522,68 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 </label>
               </div>
               <label>
-                Hours of work
+                Hours it&apos;ll take
                 <input name="hours" type="number" min="0.5" max="40" step="0.5" defaultValue="2" required />
               </label>
-              <button className={styles.btnPrimary}>Add and re-plan</button>
+              <button className={styles.btnPrimary}>Add</button>
             </form>
+            {manualTasks.length > 0 && (
+              <ul className={styles.taskList}>
+                {manualTasks.map((t) => (
+                  <li key={t.id}>
+                    <span>{t.title}</span>
+                    <form action={removeTask}>
+                      <input type="hidden" name="id" value={t.id} />
+                      <button className={styles.x} aria-label={`Remove ${t.title}`}>
+                        ×
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          <div className={styles.card}>
-            <h2>Sleep and sources</h2>
-            <form action={saveSettings} style={{ display: "grid", gap: 8 }}>
+          <details className={styles.card}>
+            <summary className={styles.cardSummary}>Settings</summary>
+            <form action={saveSettings} className={styles.stack}>
               <div className={styles.row}>
                 <label>
-                  Bedtime
-                  <input name="bedtime" type="time" defaultValue={settings.bedtime} />
+                  My day starts
+                  <input name="wake" type="time" defaultValue={settings.wake} />
                 </label>
                 <label>
-                  Wake up
-                  <input name="wake" type="time" defaultValue={settings.wake} />
+                  My day ends
+                  <input name="bedtime" type="time" defaultValue={settings.bedtime} />
+                </label>
+              </div>
+              <div className={styles.row}>
+                <label>
+                  Your name (for emails)
+                  <input name="name" defaultValue={settings.name} placeholder={session?.user?.name ?? "First Last"} />
+                </label>
+                <label>
+                  Your sport
+                  <input name="sport" defaultValue={settings.sport} placeholder="football" />
                 </label>
               </div>
               <input type="hidden" name="tz" value={tz} />
               {!demo && (
                 <label>
-                  Canvas feed link (only if Canvas isn&apos;t already in your Google Calendar)
+                  Team schedule link (Teamworks calendar sync)
+                  <input name="teamUrl" type="url" placeholder="https://…" defaultValue={teamUrl} />
+                </label>
+              )}
+              {!demo && (
+                <label>
+                  Canvas feed link
                   <input name="canvasUrl" type="url" placeholder="https://canvas.harvard.edu/feeds/calendars/…" defaultValue={canvasUrl} />
                 </label>
               )}
-              <button className={styles.btn}>Save and re-plan</button>
+              <button className={styles.btn}>Save</button>
             </form>
-            <p className={styles.hint}>
-              Early morning on the calendar? The night before moves earlier so you keep the same hours of sleep. In Canvas, the feed link is under Calendar → Calendar Feed.
-            </p>
-          </div>
+            <p className={styles.hint}>Free time only counts between when your day starts and ends.</p>
+          </details>
         </aside>
       </div>
     </main>

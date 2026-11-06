@@ -23,8 +23,8 @@ const WEEK: [number, string, string, string][] = [
   [3, "15:00", "18:00", "Practice"],
   [3, "19:00", "21:00", "Film"],
   [4, "10:30", "11:45", "MATH 21A lecture"],
-  [4, "13:00", "14:30", "Walkthrough"],
-  [4, "15:00", "21:00", "Travel to Penn (bus)"],
+  [4, "07:30", "09:00", "Walkthrough"],
+  [4, "10:00", "16:00", "Travel to Penn (bus)"],
   [5, "08:00", "11:00", "Team meeting and pregame"],
   [5, "12:00", "15:30", "Game vs Penn"],
   [5, "16:30", "22:00", "Travel home (bus)"],
@@ -48,6 +48,7 @@ export function demoTasks(monday: LocalDay, tz: string): Task[] {
   return [
     { id: "t1", title: "MATH 21A problem set 8", due: atLocal(addDays(monday, 2), parseClock("23:59"), tz), hours: 4, source: "canvas" },
     { id: "t2", title: "EC 10 reading response", due: atLocal(addDays(monday, 3), parseClock("09:00"), tz), hours: 2, source: "canvas" },
+    { id: "t5", title: "EC 10 problem set 5", due: atLocal(addDays(monday, 4), parseClock("17:00"), tz), hours: 3, source: "canvas" },
     { id: "t3", title: "Study for MATH 21A midterm", due: atLocal(addDays(monday, 10), parseClock("18:00"), tz), hours: 8, source: "manual" },
     { id: "t4", title: "Expos draft 2", due: atLocal(addDays(monday, 6), parseClock("17:00"), tz), hours: 3, source: "canvas" },
   ];

@@ -1,17 +1,21 @@
 # Overtime
 
-A planner for student athletes. It reads your team schedule (Google Calendar) and your class deadlines (Canvas), protects your sleep, and plans study blocks around practice, lifts, film and travel.
+A week view for student athletes: all your work due with how long it takes, your fixed team and class schedule, and your free time.
 
 **Try it without any setup:** run the app and open `/week?demo=1` for a sample in-season football week.
 
 ## What it does today
 
-- **Sleep first.** Every night from your bedtime to your wake time is blocked. If something starts early (a 6am lift), that night moves earlier so you keep the same hours of sleep. Events that run into the night are flagged.
-- **Works around the team schedule.** Reads every Google calendar you have turned on, so a Teamworks or shared team calendar counts. Items from a Canvas calendar subscribed in Google become deadlines to study for, not busy time. Keeps 45 minutes of recovery after lifts, practice, games and travel, and 15 minutes to get to each event.
-- **Plans study time.** Coursework comes from your Canvas calendar feed or is added by hand. Sessions are 30 to 90 minutes, earliest deadline first, at most 4 hours of study a day, nothing in the first 30 minutes after waking or the last 30 before bed.
-- **Tells you when it won't fit.** If a deadline can't be met in the free time you have, it says how many hours are missing.
+Overtime shows, it doesn't schedule you. You decide when to do the work.
 
-The planning logic is in `src/lib/planner.ts` and is covered by `npm test`.
+- **Work due, with time.** Every assignment from Canvas (or added by hand) with an hour estimate you can change, and a checkbox when it's done. "Due this week" and "Coming up" are listed separately.
+- **Your fixed schedule.** Practice, lifts, film, travel and class from Google Calendar, Teamworks or Canvas links. Canvas lectures count as class time, not homework.
+- **Plan work into free time, your way.** Tap "Plan time" on any assignment, pick a session length (or do it all at once), and tap open gaps on the calendar to put sessions there. Split a 4-hour problem set into three sessions across the week, or finish next week's work early. Remove a session with one tap.
+- **Suggest a plan, if you want one.** One tap spreads what's left of every assignment over your free time before it's due: sessions of up to 1.5 hours, at most 3 hours a day, nothing on game or travel days or the evening before a game. It's a faded suggestion until you accept it; tap × on any session and it finds another time.
+- **Free time, on demand.** Flip "Show free time" to see the open gaps (30 minutes or longer, between when your day starts and ends), and compare hours of free time left with hours of work due.
+- **Travel conflicts.** Every class and deadline that lands on a road trip or game, grouped by course, with an email to the professor or TF already written. It opens in Gmail, Outlook or your mail app so you check it and press send.
+- **A page for each class.** Upload a syllabus (PDF or pasted text) and Claude turns it into the rules, grading, staff emails, every due date, and what the class means for an athlete who travels. Add any date to your week in one tap.
+- **No Google needed.** Schools like Harvard block new apps from student Google accounts, so you can paste your Teamworks calendar-sync link and Canvas feed link instead.
 
 ## Run it locally
 
@@ -19,7 +23,7 @@ The planning logic is in `src/lib/planner.ts` and is covered by `npm test`.
 npm install
 cp .env.example .env.local   # then fill it in (below)
 npm run dev                   # http://localhost:3000
-npm test                      # planner tests
+npm test                      # unit tests
 ```
 
 ## Google sign-in setup (one time, about 10 minutes)
@@ -32,9 +36,13 @@ npm test                      # planner tests
    - `https://<your-vercel-domain>/api/auth/callback/google` (once deployed)
 5. Copy the client ID and secret into `.env.local` as `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`. Generate `AUTH_SECRET` with `npx auth secret`.
 
+## Syllabus reading
+
+Create an API key at [console.anthropic.com](https://console.anthropic.com/) and set it as `ANTHROPIC_API_KEY` (in `.env.local`, and in Vercel's environment variables). Each syllabus costs a few cents to read. Without a key, everything else works and the demo classes still show.
+
 ## Deploy (free)
 
-Import the repo on [Vercel](https://vercel.com/new), add the three environment variables from `.env.example`, and add the Vercel URL's callback to the Google OAuth client.
+Import the repo on [Vercel](https://vercel.com/new), add the environment variables from `.env.example`, and add the Vercel URL's callback to the Google OAuth client.
 
 ## What's next
 

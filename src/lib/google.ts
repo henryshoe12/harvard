@@ -1,10 +1,11 @@
 import { classify } from "./classify";
-import { estimateHours } from "./canvas";
+import { cleanCanvasTitle, estimateHours, isCanvasCalendarEvent } from "./canvas";
 import { atLocal, parseDayKey } from "./time";
 import type { CalEvent, Task } from "./types";
 
 type GEvent = {
   id: string;
+  iCalUID?: string;
   summary?: string;
   status?: string;
   transparency?: string;
@@ -55,7 +56,9 @@ export async function listCalendar(accessToken: string, from: Date, to: Date, tz
     const allDay = !e.start.dateTime;
     const end = e.end.dateTime ? new Date(e.end.dateTime) : null;
 
-    if (e.isCanvas || CANVAS.test(`${e.description ?? ""} ${e.location ?? ""}`)) {
+    const fromCanvas = e.isCanvas || CANVAS.test(`${e.description ?? ""} ${e.location ?? ""}`);
+    const startAt = new Date(e.start.dateTime ?? `${e.start.date}T00:00:00`);
+    if (fromCanvas && !isCanvasCalendarEvent(e.iCalUID, allDay, startAt, end ?? startAt)) {
       // All-day Canvas items are due by the end of that day.
       const due = end ?? atLocal(parseDayKey(e.start.date!), 23 * 60 + 59, tz);
       tasks.push({ id: `gcal-${e.id}`, title: cleanCanvasTitle(title), due, hours: estimateHours(title), source: "canvas" });
@@ -64,10 +67,10 @@ export async function listCalendar(accessToken: string, from: Date, to: Date, tz
     if (e.transparency === "transparent") continue; // "free" events don't block time
     events.push({
       id: e.id,
-      title,
+      title: fromCanvas ? cleanCanvasTitle(title) : title,
       start: new Date(e.start.dateTime ?? `${e.start.date}T00:00:00`),
       end: end ?? new Date(`${e.end.date}T00:00:00`),
-      kind: classify(title),
+      kind: fromCanvas ? "class" : classify(title),
       allDay,
     });
   }
@@ -76,9 +79,3 @@ export async function listCalendar(accessToken: string, from: Date, to: Date, tz
 }
 
 const CANVAS = /canvas|instructure/i;
-
-/** Canvas titles look like "Problem Set 8 [MATH 21A]"; show the course first. */
-export function cleanCanvasTitle(title: string): string {
-  const m = title.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
-  return m ? `${m[2]}: ${m[1]}` : title;
-}
