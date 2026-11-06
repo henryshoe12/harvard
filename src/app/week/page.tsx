@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { addTask, removeTask, saveSettings, signOutAction } from "@/app/actions";
 import { canvasTasks } from "@/lib/canvas";
 import { demoEvents, demoTasks } from "@/lib/demo";
-import { listEvents } from "@/lib/google";
+import { listCalendar } from "@/lib/google";
 import { planWeek } from "@/lib/planner";
 import { readPrefs } from "@/lib/prefs";
 import { addDays, atLocal, dayKey, localDay, parseDayKey, weekStart } from "@/lib/time";
@@ -43,7 +43,10 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
       problems.push("Your Google sign-in expired. Sign out and back in.");
     } else {
       try {
-        events = await listEvents(session.accessToken, from, to);
+        // Canvas deadlines are looked up three weeks ahead so a midterm next week shapes this week.
+        const cal = await listCalendar(session.accessToken, from, atLocal(addDays(monday, 21), 0, tz), tz);
+        events = cal.events.filter((e) => e.start < to);
+        tasks.push(...cal.tasks);
       } catch (e) {
         problems.push(`Couldn't read Google Calendar (${(e as Error).message}).`);
       }
@@ -56,7 +59,14 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
       }
     }
   }
-  tasks = tasks.filter((t) => t.due > from);
+  // Same deadline from Google Calendar and the Canvas link: keep one.
+  const seenTasks = new Set<string>();
+  tasks = tasks.filter((t) => {
+    const k = `${t.title.toLowerCase()}|${t.due.getTime()}`;
+    if (t.due <= from || seenTasks.has(k)) return false;
+    seenTasks.add(k);
+    return true;
+  });
 
   const plan = planWeek({ start: monday, events, tasks, settings, now: demo ? from : new Date() });
   const hours = (kind: "study" | "sleep") =>
@@ -195,7 +205,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
               <input type="hidden" name="tz" value={tz} />
               {!demo && (
                 <label>
-                  Canvas calendar feed link
+                  Canvas feed link (only if Canvas isn&apos;t already in your Google Calendar)
                   <input name="canvasUrl" type="url" placeholder="https://canvas.harvard.edu/feeds/calendars/…" defaultValue={canvasUrl} />
                 </label>
               )}

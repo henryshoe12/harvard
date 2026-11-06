@@ -134,3 +134,11 @@ describe("planWeek", () => {
     for (const b of p4.blocks.filter((x) => x.kind === "study")) expect(b.start >= now).toBe(true);
   });
 });
+
+describe("Canvas titles", () => {
+  it("puts the course first", async () => {
+    const { cleanCanvasTitle } = await import("../google");
+    expect(cleanCanvasTitle("Problem Set 8 [MATH 21A]")).toBe("MATH 21A: Problem Set 8");
+    expect(cleanCanvasTitle("Lift")).toBe("Lift");
+  });
+});
