@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { addTask, forgetMe, removeTask, saveSettings, signOutAction } from "@/app/actions";
-import { canvasTasks, feedEvents } from "@/lib/canvas";
+import { canvasFeed, feedEvents } from "@/lib/canvas";
 import { demoEvents, demoTasks } from "@/lib/demo";
 import { listCalendar } from "@/lib/google";
 import { planWeek } from "@/lib/planner";
@@ -53,7 +53,9 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     }
     if (canvasUrl) {
       try {
-        tasks.push(...(await canvasTasks(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz), tz)));
+        const canvas = await canvasFeed(canvasUrl, from, atLocal(addDays(monday, 21), 0, tz), tz);
+        tasks.push(...canvas.tasks);
+        events.push(...canvas.events.filter((e) => e.start < to));
       } catch (e) {
         problems.push(`Couldn't read your Canvas link: ${(e as Error).message}.`);
       }
@@ -68,15 +70,18 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
     }
   }
   // Same deadline from Google Calendar and the Canvas link: keep one.
+  // Past-due work drops off: it can't be planned anymore.
+  const now = demo ? from : new Date();
+  const cutoff = now > from ? now : from;
   const seenTasks = new Set<string>();
   tasks = tasks.filter((t) => {
     const k = `${t.title.toLowerCase()}|${t.due.getTime()}`;
-    if (t.due <= from || seenTasks.has(k)) return false;
+    if (t.due <= cutoff || seenTasks.has(k)) return false;
     seenTasks.add(k);
     return true;
   });
 
-  const plan = planWeek({ start: monday, events, tasks, settings, now: demo ? from : new Date() });
+  const plan = planWeek({ start: monday, events, tasks, settings, now });
   const hours = (kind: "study" | "sleep") =>
     plan.blocks.filter((b) => b.kind === kind).reduce((n, b) => n + (b.end.getTime() - b.start.getTime()) / 3600000, 0);
   const sleepNights = plan.blocks.filter((b) => b.kind === "sleep").length;
@@ -117,16 +122,30 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
           {p}
         </div>
       ))}
-      {plan.sleepConflicts.map((c, i) => (
-        <div key={`s${i}`} className={styles.warn}>
-          {c.event} runs into your sleep on the night of {c.day}. Consider asking about it or going to bed right after.
-        </div>
-      ))}
-      {plan.shortfalls.map((s) => (
-        <div key={s.taskId} className={styles.warn}>
-          Not enough free time for {s.title}: about {Math.ceil(s.missingMins / 30) / 2} more hours needed before it&apos;s due.
-        </div>
-      ))}
+      {(plan.sleepConflicts.length > 0 || plan.shortfalls.length > 0) && (
+        <details className={styles.warn}>
+          <summary>
+            {[
+              plan.shortfalls.length && `${plan.shortfalls.length} assignment${plan.shortfalls.length > 1 ? "s" : ""} won't fit before the deadline`,
+              plan.sleepConflicts.length && `${plan.sleepConflicts.length} late night${plan.sleepConflicts.length > 1 ? "s" : ""} cut into sleep`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </summary>
+          <ul className={styles.warnList}>
+            {plan.shortfalls.map((s) => (
+              <li key={s.taskId}>
+                {s.title}: about {Math.ceil(s.missingMins / 30) / 2} more hours needed
+              </li>
+            ))}
+            {plan.sleepConflicts.map((c, i) => (
+              <li key={`s${i}`}>
+                {c.event} runs into your sleep (night of {c.day})
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       <div className={styles.layout}>
         <section style={{ display: "grid", gap: 12 }}>

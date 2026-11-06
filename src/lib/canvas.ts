@@ -18,14 +18,30 @@ export function cleanCanvasTitle(title: string): string {
   return m ? `${m[2]}: ${m[1]}` : title;
 }
 
-/** Upcoming assignments from a Canvas calendar feed (Canvas > Calendar > Calendar Feed). */
-export async function canvasTasks(feedUrl: string, from: Date, to: Date, tz: string): Promise<Task[]> {
+/**
+ * Canvas feeds mix two things: assignments (deadlines to study for) and
+ * calendar events such as lectures and sections (time already taken).
+ * Canvas marks them in the UID: "event-assignment-…" vs "event-calendar-event-…".
+ */
+export function isCanvasCalendarEvent(uid: string | undefined, allDay: boolean, start: Date, end: Date): boolean {
+  if (uid && /calendar-event/i.test(uid)) return true;
+  if (uid && /assignment|quiz|discussion/i.test(uid)) return false;
+  // No telling UID: a timed item with real length is a class, a zero-length one a deadline.
+  return !allDay && end.getTime() - start.getTime() >= 15 * 60000;
+}
+
+/** Upcoming assignments and class events from a Canvas calendar feed (Canvas > Calendar > Calendar Feed). */
+export async function canvasFeed(feedUrl: string, from: Date, to: Date, tz: string): Promise<{ tasks: Task[]; events: CalEvent[] }> {
   const items = await fetchFeed(feedUrl, from, to);
-  return items.map((it) => {
+  const events: CalEvent[] = items
+    .filter((it) => isCanvasCalendarEvent(it.uid, it.allDay, it.start, it.end))
+    .map((it) => ({ id: `canvas-${it.uid}`, title: cleanCanvasTitle(it.title), start: it.start, end: it.end, kind: "class" as const, allDay: it.allDay }));
+  const tasks = items.filter((it) => !isCanvasCalendarEvent(it.uid, it.allDay, it.start, it.end)).map((it) => {
     // All-day Canvas items are due by the end of that day.
     const due = it.allDay ? atLocal(localDay(new Date(it.start.getTime() + 12 * 3600000), "UTC"), 23 * 60 + 59, tz) : it.end;
     return { id: `canvas-${it.uid}`, title: cleanCanvasTitle(it.title), due, hours: estimateHours(it.title), source: "canvas" as const };
   });
+  return { tasks, events };
 }
 
 /** Team schedule from a Teamworks (or any) calendar feed link. */

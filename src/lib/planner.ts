@@ -103,6 +103,7 @@ export function planWeek(opts: {
     let remaining = Math.round(task.hours * 60);
     const perDay = new Map<string, number>();
     const due = task.due.getTime();
+    if (due <= now) continue; // already past due: nothing left to plan
 
     for (const slot of free) {
       if (remaining <= 0) break;

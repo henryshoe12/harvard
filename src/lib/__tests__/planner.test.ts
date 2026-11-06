@@ -172,3 +172,23 @@ describe("calendar feed links", () => {
     }
   });
 });
+
+describe("Canvas items", () => {
+  it("treats lectures as class time and assignments as deadlines", async () => {
+    const { isCanvasCalendarEvent } = await import("../canvas");
+    const t = new Date("2026-11-03T18:00:00Z");
+    const later = new Date("2026-11-03T19:15:00Z");
+    expect(isCanvasCalendarEvent("event-calendar-event-123", false, t, later)).toBe(true);
+    expect(isCanvasCalendarEvent("event-assignment-456", false, t, t)).toBe(false);
+    expect(isCanvasCalendarEvent(undefined, false, t, later)).toBe(true);
+    expect(isCanvasCalendarEvent(undefined, false, t, t)).toBe(false);
+  });
+
+  it("drops work that is already past due instead of warning about it", () => {
+    const late = { id: "late", title: "Old quiz", hours: 1, due: atLocal(monday, parseClock("21:00"), tz) };
+    const now = atLocal({ y: 2026, m: 11, d: 12 }, parseClock("12:00"), tz);
+    const p = planWeek({ start: monday, events: [], tasks: [late], settings: DEFAULT_SETTINGS, now });
+    expect(p.shortfalls).toEqual([]);
+    expect(p.blocks.filter((b) => b.kind === "study")).toEqual([]);
+  });
+});
